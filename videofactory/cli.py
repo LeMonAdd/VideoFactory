@@ -19,6 +19,8 @@ from .director_service import create_director_plan
 from .input_handler import inspect_input
 from .edit_timeline import build_edit_timeline, validate_edit_timeline
 from .edit_renderer import EditRenderer
+from .retimed_edit import build_retimed_edit_timeline
+from .speech_renderer import SpeechEditRenderer
 from .media_probe import duration as probe_duration
 from .media_probe import probe, stream
 from .models import read_json, write_json
@@ -33,7 +35,9 @@ from .source_selection import build_selection_context, validate_selection
 from .source_selection_service import create_source_selection
 from .source_selector import CodexSourceSelector, RuleBasedSourceSelector
 from .source_models import validate_sources_document
-from .speech_edit import SpeechEditPlanner, build_retime_map, validate_inputs, validate_parameters
+from .speech_edit import (SpeechEditPlanner, build_retime_map, validate_inputs,
+                          validate_parameters, validate_retime_map,
+                          validate_saved_speech_edit_plan)
 from .silence_detector import LocalAudioSilenceDetector, validate_noise_db
 from .timeline import build_timeline
 from .transcriber import FixtureTranscriber, RealMLXTranscriber
@@ -87,6 +91,8 @@ def parser() -> argparse.ArgumentParser:
                         help="Render the saved layered edit timeline to edited_draft.mp4")
     result.add_argument("--plan-speech-edits", action="store_true",
                         help="Plan conservative speech-gap cuts and a canonical time map without rendering")
+    result.add_argument("--render-speech-edits", action="store_true",
+                        help="Render the saved speech-shortened layered edit to speech_edited_draft.mp4")
     result.add_argument("--pause-threshold-seconds", type=float, default=1.0,
                         help="Minimum detected audio silence to consider for shortening (default: 1.0)")
     result.add_argument("--pause-keep-seconds", type=float, default=0.25,
@@ -391,6 +397,62 @@ def run_plan_speech_edits(args: argparse.Namespace) -> tuple[Path, Path]:
     return plan_path, map_path
 
 
+def run_render_speech_edits(args: argparse.Namespace) -> Path:
+    name = safe_project_name(args.project)
+    paths = ProjectPaths(ROOT, name)
+    final = paths.output / "speech_edited_draft.mp4"
+    if final.exists() and not args.overwrite_render:
+        raise FileExistsError(f"Speech-edited draft already exists: {final}; use --overwrite-render")
+    progress = ProgressReporter(6)
+    progress.start(1, "Loading speech edit artifacts")
+    required = ("project.json", "transcript.json", "director_plan.json", "clip_plan.json",
+                "edit_timeline.json", "download_manifest.json", "speech_edit_plan.json",
+                "retime_map.json")
+    for filename in required:
+        if not (paths.project / filename).is_file():
+            raise FileNotFoundError(f"Existing project needs {paths.project / filename}")
+    project = read_json(paths.project / "project.json")
+    transcript = read_json(paths.project / "transcript.json")
+    director_plan = read_json(paths.project / "director_plan.json")
+    clip_plan = read_json(paths.project / "clip_plan.json")
+    timeline = read_json(paths.project / "edit_timeline.json")
+    download_manifest = validate_manifest(read_json(paths.project / "download_manifest.json"), name)
+    speech_plan = read_json(paths.project / "speech_edit_plan.json")
+    retime_map = read_json(paths.project / "retime_map.json")
+    progress.complete(1, "Speech edit artifact loading")
+    progress.start(2, "Validating canonical retime map")
+    validate_plan(director_plan, name, timeline["duration"], project["mode"])
+    validate_saved_speech_edit_plan(speech_plan, project, transcript, timeline)
+    validate_retime_map(retime_map, speech_plan)
+    progress.complete(2, "Canonical retime map validation")
+    progress.start(3, "Building retimed edit timeline")
+    retimed = build_retimed_edit_timeline(project, transcript, director_plan, clip_plan,
+                                          timeline, speech_plan, retime_map, paths.project)
+    for number, keep in enumerate(retime_map["segments"], 1):
+        print(f"      keep segment {number}: {keep['source_start']:.3f}-{keep['source_end']:.3f} "
+              f"-> {keep['edited_start']:.3f}-{keep['edited_end']:.3f}", flush=True)
+    for overlay in retimed["visual_overlays"]:
+        print(f"      B-roll shot {overlay['shot_id']} piece {overlay['segment_index']}: "
+              f"{overlay['original_timeline_start']:.3f}-{overlay['original_timeline_end']:.3f} "
+              f"-> {overlay['timeline_start']:.3f}-{overlay['timeline_end']:.3f}", flush=True)
+    write_json(paths.project / "retimed_edit_timeline.json", retimed)
+    progress.complete(3, "Retimed edit timeline construction")
+    progress.start(4, "Building FFmpeg render graph")
+    def begin_render() -> None:
+        progress.complete(4, "FFmpeg render graph construction")
+        progress.start(5, "Rendering speech-edited draft")
+    def begin_validate() -> None:
+        progress.complete(5, "Speech-edited draft rendering")
+        progress.start(6, "Validating and saving render result")
+    SpeechEditRenderer().render(paths.project, paths.output, project, transcript,
+                                director_plan, clip_plan, timeline, download_manifest,
+                                speech_plan, retime_map, retimed, encoder=args.encoder,
+                                overwrite=args.overwrite_render, before_render=begin_render,
+                                before_validate=begin_validate)
+    progress.complete(6, "Speech render validation and save")
+    return final
+
+
 def run(args: argparse.Namespace) -> dict:
     name = safe_project_name(args.project)
     mode = "TALKING_HEAD" if args.video else "VOICEOVER"
@@ -454,7 +516,7 @@ def main(argv: list[str] | None = None) -> int:
     args = command_parser.parse_args(argv)
     workflows = sum((args.plan_only, args.find_sources, args.select_sources,
                      args.download_sources, args.build_edit_timeline, args.render_edit,
-                     args.plan_speech_edits))
+                     args.plan_speech_edits, args.render_speech_edits))
     if workflows > 1:
         command_parser.error("Choose only one existing-project workflow")
     if args.find_sources:
@@ -477,6 +539,9 @@ def main(argv: list[str] | None = None) -> int:
     elif args.plan_speech_edits:
         if args.video or args.voice or args.fixture_transcript:
             command_parser.error("--plan-speech-edits uses an existing project and cannot take source or fixture arguments")
+    elif args.render_speech_edits:
+        if args.video or args.voice or args.fixture_transcript:
+            command_parser.error("--render-speech-edits uses an existing project and cannot take source or fixture arguments")
     elif args.source_provider:
         command_parser.error("--source-provider requires --find-sources")
     elif args.plan_only:
@@ -517,6 +582,9 @@ def main(argv: list[str] | None = None) -> int:
     except ValueError as exc:
         command_parser.error(str(exc))
     try:
+        if args.render_speech_edits:
+            print(f"Speech-edited draft rendered and validated: {run_render_speech_edits(args)}")
+            return 0
         if args.plan_speech_edits:
             plan_path, map_path = run_plan_speech_edits(args)
             print(f"Speech edit plan saved: {plan_path}\nRetime map saved: {map_path}")

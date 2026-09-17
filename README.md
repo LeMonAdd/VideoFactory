@@ -152,6 +152,16 @@ Whisper word timestamps are validated for transcript integrity and used to ident
 
 The command writes `projects/<name>/speech_edit_plan.json` with cuts, detected-silence bounds, detection settings, complementary keep segments, duration totals, and B-roll shot IDs intersected by each cut. It also writes `retime_map.json`, whose segments map kept source time to edited time. The reusable `map_source_time` helper raises for timestamps inside a removed region unless the caller explicitly chooses a boundary bias. V4A does not alter B-roll choices or source ranges, apply punch-ins, change audio or video, or render. Future V4B can apply the same cuts to all layers.
 
+### V4B speech-shortened compositing
+
+V4B consumes the saved V4A plan and map; it does not detect silence again. It builds `projects/<name>/retimed_edit_timeline.json`, then renders again from the original primary media and selected local B-roll:
+
+```sh
+./.venv/bin/python factory.py --project real_test_large_001 --render-speech-edits --encoder libx264
+```
+
+The renderer trims every canonical keep segment from both primary video and primary audio and concatenates them in the same order. It maps B-roll through intersections with those keep segments. A B-roll overlay crossing a removed interval becomes separate pieces with advancing source ranges, so the footage is cut rather than stretched or restarted. B-roll audio remains muted. V4B writes `output/<name>/speech_edited_draft.mp4` and `projects/<name>/speech_render_manifest.json`; the V3D `edited_draft.mp4` remains separate. `--overwrite-render` applies only to the speech-edited output in this mode.
+
 Inspect the plan and map before any timing changes to media:
 
 ```sh

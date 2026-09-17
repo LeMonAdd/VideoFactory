@@ -1,0 +1,51 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "VideoFactory Retimed Layered Edit Timeline",
+  "type": "object", "additionalProperties": false,
+  "required": ["schema_version", "project_name", "mode", "source_duration", "duration", "retime_source", "base_video", "base_audio", "visual_overlays"],
+  "properties": {
+    "schema_version": {"type": "integer", "const": 1},
+    "project_name": {"type": "string", "minLength": 1},
+    "mode": {"type": "string", "const": "TALKING_HEAD"},
+    "source_duration": {"type": "number", "exclusiveMinimum": 0},
+    "duration": {"type": "number", "exclusiveMinimum": 0},
+    "retime_source": {"type": "string", "const": "retime_map.json"},
+    "base_video": {"$ref": "#/$defs/primary"},
+    "base_audio": {"$ref": "#/$defs/primary"},
+    "visual_overlays": {"type": "array", "items": {"type": "object", "additionalProperties": false,
+      "required": ["shot_id", "segment_index", "candidate_id", "visual_type", "source_path", "original_timeline_start", "original_timeline_end", "timeline_start", "timeline_end", "source_in", "source_out", "source_audio", "audio_policy"],
+      "properties": {
+        "shot_id": {"type": "integer", "minimum": 1},
+        "segment_index": {"type": "integer", "minimum": 1},
+        "candidate_id": {"type": "string", "minLength": 1},
+        "visual_type": {"type": "string", "const": "B_ROLL"},
+        "source_path": {"type": "string", "minLength": 1},
+        "original_timeline_start": {"type": "number", "minimum": 0},
+        "original_timeline_end": {"type": "number", "exclusiveMinimum": 0},
+        "timeline_start": {"type": "number", "minimum": 0},
+        "timeline_end": {"type": "number", "exclusiveMinimum": 0},
+        "source_in": {"type": "number", "minimum": 0},
+        "source_out": {"type": "number", "exclusiveMinimum": 0},
+        "source_audio": {"type": "boolean", "const": false},
+        "audio_policy": {"type": "string", "const": "MUTE_SOURCE"}
+      }}}
+  },
+  "$defs": {
+    "keep": {"type": "object", "additionalProperties": false,
+      "required": ["source_start", "source_end", "source_duration", "edited_start", "edited_end"],
+      "properties": {
+        "source_start": {"type": "number", "minimum": 0},
+        "source_end": {"type": "number", "exclusiveMinimum": 0},
+        "source_duration": {"type": "number", "exclusiveMinimum": 0},
+        "edited_start": {"type": "number", "minimum": 0},
+        "edited_end": {"type": "number", "exclusiveMinimum": 0}
+      }},
+    "primary": {"type": "object", "additionalProperties": false,
+      "required": ["role", "source_path", "keep_segments"],
+      "properties": {
+        "role": {"type": "string", "const": "PRIMARY"},
+        "source_path": {"type": "string", "minLength": 1},
+        "keep_segments": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/keep"}}
+      }}
+  }
+}

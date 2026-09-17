@@ -185,6 +185,8 @@ def validate_edited_output(path: Path, expected_duration: float) -> dict[str, An
     if (video.get("codec_name") != "h264" or audio.get("codec_name") != "aac" or
             video.get("width") != WIDTH or video.get("height") != HEIGHT):
         raise ValueError("Edited render has unexpected codec or resolution")
+    if video.get("pix_fmt") is not None and video["pix_fmt"] != "yuv420p":
+        raise ValueError("Edited render has unexpected pixel format")
     try:
         fps = float(Fraction(video.get("avg_frame_rate", "0/1")))
         duration = probe_duration(info)

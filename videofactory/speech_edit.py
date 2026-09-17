@@ -119,9 +119,9 @@ def _build_keeps(duration: int, cuts: list[dict[str, Any]]) -> list[dict[str, fl
     return keeps
 
 
-def validate_speech_edit_plan(document: dict[str, Any], project: dict[str, Any],
-                              transcript: dict[str, Any], timeline: dict[str, Any],
-                              silences: list[tuple[float, float]]) -> dict[str, Any]:
+def _validate_speech_edit_plan(document: dict[str, Any], project: dict[str, Any],
+                               transcript: dict[str, Any], timeline: dict[str, Any],
+                               silences: list[tuple[float, float]] | None) -> dict[str, Any]:
     _schema_validate(document, PLAN_SCHEMA)
     duration, words = validate_inputs(project, transcript, timeline)
     if document["project_name"] != project["project_name"] or _milliseconds(document["source_duration"], "Source duration") != duration:
@@ -133,10 +133,11 @@ def validate_speech_edit_plan(document: dict[str, Any], project: dict[str, Any],
         raise ValueError("Speech boundary padding mismatch")
     detection = document["detection"]
     validate_noise_db(detection["noise_db"])
-    validate_silences(silences, _seconds(duration))
+    if silences is not None:
+        validate_silences(silences, _seconds(duration))
     first_word_start, last_word_end = words[0][0], words[-1][1]
-    validated_intervals = {(_milliseconds(start, "Silence start"), _milliseconds(end, "Silence end"))
-                           for start, end in silences}
+    validated_intervals = ({(_milliseconds(start, "Silence start"), _milliseconds(end, "Silence end"))
+                            for start, end in silences} if silences is not None else None)
     previous_end = 0
     for index, cut in enumerate(document["cuts"], 1):
         start, end = (_milliseconds(cut[key], key) for key in ("source_start", "source_end"))
@@ -146,7 +147,7 @@ def validate_speech_edit_plan(document: dict[str, Any], project: dict[str, Any],
             raise ValueError("Speech cut duration mismatch")
         silence_start = _milliseconds(cut["detected_silence_start"], "Detected silence start")
         silence_end = _milliseconds(cut["detected_silence_end"], "Detected silence end")
-        if ((silence_start, silence_end) not in validated_intervals or
+        if ((validated_intervals is not None and (silence_start, silence_end) not in validated_intervals) or
                 silence_start < first_word_start or silence_end > last_word_end or
                 silence_end - silence_start < threshold_ms or
                 start < silence_start + padding_ms or end > silence_end - padding_ms or
@@ -166,6 +167,19 @@ def validate_speech_edit_plan(document: dict[str, Any], project: dict[str, Any],
     if document["keep_segments"] != _build_keeps(duration, document["cuts"]):
         raise ValueError("Keep segments do not exactly cover the complement of cuts")
     return document
+
+
+def validate_speech_edit_plan(document: dict[str, Any], project: dict[str, Any],
+                              transcript: dict[str, Any], timeline: dict[str, Any],
+                              silences: list[tuple[float, float]]) -> dict[str, Any]:
+    """Planning-time validation checks each claimed silence against detector output."""
+    return _validate_speech_edit_plan(document, project, transcript, timeline, silences)
+
+
+def validate_saved_speech_edit_plan(document: dict[str, Any], project: dict[str, Any],
+                                    transcript: dict[str, Any], timeline: dict[str, Any]) -> dict[str, Any]:
+    """Validate a frozen plan's structure and provenance without audio analysis."""
+    return _validate_speech_edit_plan(document, project, transcript, timeline, None)
 
 
 class SpeechEditPlanner:
