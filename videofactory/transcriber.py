@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import os
 import subprocess
 import uuid
 from pathlib import Path
@@ -30,9 +29,12 @@ class FixtureTranscriber:
 
 
 class RealMLXTranscriber:
-    def __init__(self, work_dir: Path, model: str | None = None) -> None:
+    def __init__(self, work_dir: Path, model: str, language: str | None = None) -> None:
+        if not model.strip():
+            raise ValueError("A local MLX Whisper model path or model ID is required")
         self.work_dir = work_dir
         self.model = model
+        self.language = language
 
     def transcribe(self, audio: Path, media_duration: float) -> dict:
         executable = ROOT / ".venv" / "bin" / "mlx_whisper"
@@ -43,13 +45,11 @@ class RealMLXTranscriber:
         command = [str(executable), str(audio), "--output-dir", str(self.work_dir),
                    "--output-name", name, "--output-format", "json",
                    "--word-timestamps", "True", "--verbose", "False"]
-        if self.model:
-            command.extend(["--model", self.model])
-        environment = os.environ.copy()
-        environment["HF_HUB_OFFLINE"] = "1"
-        environment["TRANSFORMERS_OFFLINE"] = "1"
+        command.extend(["--model", self.model])
+        if self.language:
+            command.extend(["--language", self.language])
         try:
-            result = subprocess.run(command, capture_output=True, text=True, env=environment, check=False)
+            result = subprocess.run(command, capture_output=True, text=True, check=False)
         except OSError as exc:
             raise RuntimeError(f"Could not start local MLX Whisper: {exc}") from exc
         output = self.work_dir / f"{name}.json"

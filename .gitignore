@@ -22,3 +22,6 @@ projects/synthetic_*/
 
 # Generated synthetic integration projects
 projects/synthetic_*/
+
+# Runtime project data
+projects/*/

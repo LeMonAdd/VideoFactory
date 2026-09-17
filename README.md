@@ -22,7 +22,7 @@ VideoFactory V1 is a local automated video-editing pipeline for macOS Apple Sili
 
 ## Setup and commands
 
-Use the repository virtual environment explicitly. Install the project's Python requirements into it only if missing; the V1 pipeline itself uses the standard library, while real transcription requires the existing `mlx_whisper` installation and tests require `pytest`. FFmpeg and ffprobe must be available at `/opt/homebrew/bin/ffmpeg` and `/opt/homebrew/bin/ffprobe`. A real MLX run needs a locally available model and host Metal access. VideoFactory sets offline flags for MLX Whisper so it does not download a model.
+Use the repository virtual environment explicitly. Install the project's Python requirements into it only if missing; the V1 pipeline itself uses the standard library, while real transcription requires the existing `mlx_whisper` installation and tests require `pytest`. FFmpeg and ffprobe must be available at `/opt/homebrew/bin/ffmpeg` and `/opt/homebrew/bin/ffprobe`. A real MLX run needs host Metal access. The default real transcription model is `mlx-community/whisper-large-v3-turbo`, configured in `config/transcription.json`. MLX Whisper uses a cached model when present; otherwise Hugging Face may download it on the first run. VideoFactory inherits Hugging Face environment settings from the host shell without changing them.
 
 First real talking-head test:
 
@@ -36,7 +36,7 @@ Standalone voiceover:
 ./.venv/bin/python factory.py --voice inbox/voice.wav --project demo_voice
 ```
 
-Put optional supporting videos in `assets/broll/` and stills in `assets/images/`. Use `--mlx-model /path/to/local/model` for a specific local model. Replacing an existing generated draft requires `--overwrite-render`; source media is never modified. `--encoder h264_videotoolbox` opts into hardware encoding; software `libx264` is the default.
+Put optional supporting videos in `assets/broll/` and stills in `assets/images/`. Use `--whisper-model /path/to/local/model` or another Hugging Face model ID to override the configured default; the older `--mlx-model` spelling remains an alias. Add `--language ru` for Russian narration, or omit it for MLX Whisper language detection. The selected backend, model, and language setting are recorded in `project.json`. Replacing an existing generated draft requires `--overwrite-render`; source media is never modified. `--encoder h264_videotoolbox` opts into hardware encoding; software `libx264` is the default.
 
 To bypass MLX for a deterministic test:
 

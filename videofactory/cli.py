@@ -11,7 +11,7 @@ from . import SCHEMA_VERSION
 from .asset_manager import discover_assets
 from .audio import extract_narration
 from .input_handler import inspect_input
-from .models import write_json
+from .models import read_json, write_json
 from .paths import ROOT, ProjectPaths, safe_project_name
 from .renderer import render
 from .scene_planner import plan_scenes
@@ -23,6 +23,14 @@ DEFAULT_SETTINGS = {"width": 1920, "height": 1080, "fps": 30,
                     "video_codec": "h264", "audio_codec": "aac"}
 
 
+def default_whisper_model() -> str:
+    config = read_json(ROOT / "config" / "transcription.json")
+    model = config.get("default_whisper_model")
+    if not isinstance(model, str) or not model.strip():
+        raise ValueError("config/transcription.json needs a non-empty default_whisper_model")
+    return model
+
+
 def parser() -> argparse.ArgumentParser:
     result = argparse.ArgumentParser(description="Local VideoFactory V1 editing pipeline")
     source = result.add_mutually_exclusive_group(required=True)
@@ -31,7 +39,10 @@ def parser() -> argparse.ArgumentParser:
     result.add_argument("--project", required=True, help="Safe project name")
     result.add_argument("--fixture-transcript", type=Path,
                         help="Deterministic JSON transcript; bypasses MLX Whisper")
-    result.add_argument("--mlx-model", help="Local or already cached MLX Whisper model")
+    result.add_argument("--whisper-model", "--mlx-model", dest="whisper_model",
+                        default=default_whisper_model(),
+                        help="Local MLX model path or Hugging Face model ID (default: project config)")
+    result.add_argument("--language", help="Whisper language code, for example ru; omit to auto-detect")
     result.add_argument("--assets-dir", type=Path,
                         help="Local asset root with broll/ and images/ (default: assets/)")
     result.add_argument("--encoder", choices=["libx264", "h264_videotoolbox"],
@@ -53,11 +64,16 @@ def run(args: argparse.Namespace) -> dict:
         "schema_version": SCHEMA_VERSION, "project_name": name, "mode": mode,
         "source_media": str(source), "created_at": datetime.now(timezone.utc).isoformat(),
         "output_settings": DEFAULT_SETTINGS,
+        "transcription": {
+            "backend": "fixture" if args.fixture_transcript else "mlx_whisper",
+            "model": None if args.fixture_transcript else args.whisper_model,
+            "language": args.language or "auto",
+        },
     }
     write_json(paths.project / "project.json", project)
     narration = extract_narration(source, paths.temp / "narration.wav")
     transcriber = (FixtureTranscriber(args.fixture_transcript) if args.fixture_transcript
-                   else RealMLXTranscriber(paths.temp, args.mlx_model))
+                   else RealMLXTranscriber(paths.temp, args.whisper_model, args.language))
     transcript = transcriber.transcribe(narration, media_duration)
     write_json(paths.project / "transcript.json", transcript)
     sources = discover_assets(ROOT, mode, source if mode == "TALKING_HEAD" else None,
