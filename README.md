@@ -1,10 +1,10 @@
 # VideoFactory
 
-VideoFactory is a local automated video-editing pipeline for macOS Apple Silicon. It turns narration and local visuals into a 1920×1080, 30 fps H.264/AAC draft. Python 3.12, FFmpeg/ffprobe, and local MLX Whisper handle media and transcription. V2A adds an editorial DirectorPlan; V3A searches external media candidates; V3B1 selects or rejects them without downloading or rendering. Fixture transcripts keep automated tests independent of Metal.
+VideoFactory is a local automated video-editing pipeline for macOS Apple Silicon. It turns narration and local visuals into a 1920×1080, 30 fps H.264/AAC draft. Python 3.12, FFmpeg/ffprobe, and local MLX Whisper handle media and transcription. V2A adds an editorial DirectorPlan; V3A searches external media candidates; V3B1 selects or rejects them; V3B2 downloads selected assets. Fixture transcripts keep automated tests independent of Metal.
 
 ## Architecture
 
-`factory.py` orchestrates independent stages: input validation → ffprobe → narration extraction → transcription → transcript normalization → DirectorPlan → local asset resolution → scenes → timeline → FFmpeg rendering → ffprobe validation. The modules live in `videofactory/`. `director_plan.json` records what should appear; `timeline.json` records the actual sources and timing used to render. The separate V3A Source Finder writes candidate requests to `sources.json`; V3B1 writes decisions to `source_selection.json`. Neither changes the timeline. `scripts/render_timeline.py` can replay a saved edit.
+`factory.py` orchestrates independent stages: input validation → ffprobe → narration extraction → transcription → transcript normalization → DirectorPlan → local asset resolution → scenes → timeline → FFmpeg rendering → ffprobe validation. The modules live in `videofactory/`. `director_plan.json` records what should appear; `timeline.json` records the actual sources and timing used to render. The separate V3A Source Finder writes candidate requests to `sources.json`; V3B1 writes decisions to `source_selection.json`; V3B2 writes downloaded media and `download_manifest.json`. These stages do not change the timeline. `scripts/render_timeline.py` can replay a saved edit.
 
 **TALKING_HEAD** reads a video with narration. Its original audio runs continuously while the picture may switch between presenter footage and explicitly matched local visuals. Uncovered intervals and unresolved visual requests remain A-roll. **VOICEOVER** reads narration audio and uses local B-roll, still images, or a plain graphic placeholder. Unresolved VOICEOVER requests become graphic placeholders.
 
@@ -89,7 +89,25 @@ Run selection against saved `director_plan.json` and `sources.json`:
 
 The offline rule selector is the default. It accepts explicitly tagged local assets or Pexels page-title clues that contain every meaningful query term, provided a video is long enough for the shot. It is deliberately conservative and can reject plausible but unproven results. The opt-in Codex selector makes one read-only `codex exec` call with compact shot and candidate metadata; it sends no media, API key, repository files, or download links. `--selector-model MODEL` and `--selector-timeout SECONDS` are optional. VideoFactory validates every returned ID against that shot's saved candidates and checks duration before writing `source_selection.json`.
 
-Selections are `SELECTED`, `NO_SUITABLE_CANDIDATE`, or `SKIPPED`. Rejection is valid when metadata does not establish a match, such as generic breakfast footage for narration specifically about Japan. Repeated queries are decided per shot; the rule selector prefers a different equally suitable clip. The file records a reason, optional confidence and refined query, plus VideoFactory-created provider metadata. Selection does not search, download, transcribe, invoke the Director, alter the timeline, or render. **Future V3B2** will download selected candidates; **future V3C** will choose source in/out points and build the final external-media render timeline.
+Selections are `SELECTED`, `NO_SUITABLE_CANDIDATE`, or `SKIPPED`. Rejection is valid when metadata does not establish a match, such as generic breakfast footage for narration specifically about Japan. Repeated queries are decided per shot; the rule selector prefers a different equally suitable clip. The file records a reason, optional confidence and refined query, plus VideoFactory-created provider metadata. Selection does not search, download, transcribe, invoke the Director, alter the timeline, or render.
+
+### V3B2 selected media download
+
+This command **downloads media from the network** for selected Pexels videos only:
+
+```sh
+./.venv/bin/python factory.py --project real_test_large_001 --download-sources --max-download-mb 500
+```
+
+It reads the saved plan, candidates, and selection; it does not search Pexels or invoke Codex. Each unique selected candidate is downloaded once even when several shots reference it. The downloader chooses one MP4 variant, preferring suitable landscape 1080p over 720p or unnecessary 4K. It enforces an HTTPS-only URL, verified TLS, a 500 MiB default per-asset limit, streaming size checks, `.part` staging, SHA-256, and ffprobe validation before making a final file available. Reruns reuse a file only when its hash matches the existing manifest; mismatches fail without overwriting it. No Pexels API key is sent to the media host.
+
+Downloaded files live in `projects/<name>/media/broll/`. `download_manifest.json` maps each candidate to all shot IDs and records its local path, source page, creator, license, selected file metadata, measured dimensions and duration, size, SHA-256, and content type. To inspect it without a network call:
+
+```sh
+./.venv/bin/python -m json.tool projects/real_test_large_001/download_manifest.json
+```
+
+**Future V3C** will choose source in/out points and integrate downloaded assets into the final timeline and render. V3B2 does not transcode or render them.
 
 ## Tests and synthetic integration
 
@@ -105,6 +123,6 @@ Replay a saved edit with `./.venv/bin/python scripts/render_timeline.py --projec
 
 ## Project state
 
-Every new `projects/<name>/` directory contains `project.json` (mode, input, settings), `transcript.json` (normalized timed segments and optional words), `director_plan.json` (editorial shots, reasons, provider/model, invocation count and elapsed time), `scenes.json` (resolved visuals or preserved unresolved queries), `sources.json` (local source metadata plus optional V3A search requests), and `timeline.json` (exact visual events and continuous narration source). Running V3B1 adds `source_selection.json`; it is not needed for the local V1 render. Each document has `schema_version`. Paths in project state are absolute local paths, so reproducing an edit requires the referenced media to remain available.
+Every new `projects/<name>/` directory contains `project.json` (mode, input, settings), `transcript.json` (normalized timed segments and optional words), `director_plan.json` (editorial shots, reasons, provider/model, invocation count and elapsed time), `scenes.json` (resolved visuals or preserved unresolved queries), `sources.json` (local source metadata plus optional V3A search requests), and `timeline.json` (exact visual events and continuous narration source). Running V3B1 adds `source_selection.json`; V3B2 adds `download_manifest.json` and selected media. Neither is needed for the local V1 render. Each document has `schema_version`. Paths in project state are absolute local paths, so reproducing an edit requires the referenced media to remain available.
 
-V3B1 chooses among saved candidates only. It does not download media, select music, style subtitles, publish videos, or generate images.
+V3B2 downloads selected video files but does not integrate them into rendering, select music, style subtitles, publish videos, or generate images.

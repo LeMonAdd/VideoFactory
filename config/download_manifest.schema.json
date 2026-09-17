@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "VideoFactory Download Manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "project_name", "assets"],
+  "properties": {
+    "schema_version": {"type": "integer", "const": 1},
+    "project_name": {"type": "string", "minLength": 1},
+    "assets": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["candidate_id", "provider", "provider_asset_id", "media_type", "status", "shot_ids", "relative_path", "source_page_url", "download_url", "creator", "creator_url", "license_name", "license_url", "candidate_width", "candidate_height", "candidate_duration", "chosen_file", "width", "height", "duration", "file_size_bytes", "sha256", "content_type"],
+        "properties": {
+          "candidate_id": {"type": "string", "minLength": 1},
+          "provider": {"type": "string", "const": "pexels"},
+          "provider_asset_id": {"type": "string", "pattern": "^[0-9]+$"},
+          "media_type": {"type": "string", "const": "VIDEO"},
+          "status": {"type": "string", "enum": ["DOWNLOADED", "REUSED"]},
+          "shot_ids": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "integer", "minimum": 1}},
+          "relative_path": {"type": "string", "pattern": "^media/broll/pexels_video_[0-9]+\\.mp4$"},
+          "source_page_url": {"type": ["string", "null"]},
+          "download_url": {"type": "string"},
+          "creator": {"type": ["string", "null"]},
+          "creator_url": {"type": ["string", "null"]},
+          "license_name": {"type": ["string", "null"]},
+          "license_url": {"type": ["string", "null"]},
+          "candidate_width": {"type": ["integer", "null"], "minimum": 1},
+          "candidate_height": {"type": ["integer", "null"], "minimum": 1},
+          "candidate_duration": {"type": ["number", "null"], "minimum": 0},
+          "chosen_file": {
+            "type": "object", "additionalProperties": false,
+            "required": ["width", "height", "quality", "file_type"],
+            "properties": {
+              "width": {"type": ["integer", "null"], "minimum": 1},
+              "height": {"type": ["integer", "null"], "minimum": 1},
+              "quality": {"type": ["string", "null"]},
+              "file_type": {"type": ["string", "null"]}
+            }
+          },
+          "width": {"type": "integer", "minimum": 1},
+          "height": {"type": "integer", "minimum": 1},
+          "duration": {"type": "number", "exclusiveMinimum": 0},
+          "file_size_bytes": {"type": "integer", "minimum": 1},
+          "sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+          "content_type": {"type": "string", "enum": ["video/mp4", "application/mp4", "application/octet-stream", "binary/octet-stream"]}
+        }
+      }
+    }
+  }
+}

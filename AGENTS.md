@@ -2,7 +2,7 @@
 
 ## Purpose and Scope
 
-VideoFactory is a local automated video-editing pipeline for macOS Apple Silicon. Python 3.12 orchestrates the workflow; FFmpeg and ffprobe process and inspect media; MLX Whisper transcribes locally. V2A adds a transcript-only AI Director. V3A adds opt-in external candidate search; V3B1 selects or rejects saved candidates. All rendered visual media remains local.
+VideoFactory is a local automated video-editing pipeline for macOS Apple Silicon. Python 3.12 orchestrates the workflow; FFmpeg and ffprobe process and inspect media; MLX Whisper transcribes locally. V2A adds a transcript-only AI Director. V3A adds opt-in external candidate search; V3B1 selects or rejects saved candidates; V3B2 downloads selected assets. Rendering does not yet use external assets.
 
 Do not add YouTube downloading, automatic internet B-roll search during normal editing, web scraping, a GUI, automatic music selection, automatic subtitle styling, external transcription or Director APIs, or cloud rendering unless explicitly requested. Do not require an OpenAI API key.
 
@@ -32,7 +32,11 @@ In both modes, persist editing decisions in structured JSON rather than agent me
 
 ## Source Selection V3B1
 
-`--select-sources` reads the existing director plan and source requests, then writes only `source_selection.json`. The default `--selector rule` is deterministic and conservative; `--selector codex` requires explicit opt-in and one sandboxed, read-only Codex call with compact metadata. Reject candidates when semantic evidence or source duration is insufficient. Treat Pexels URL slugs as clues, not verified content; never infer nationality from creator names. Validate selected IDs against the candidates for the same shot, and add runtime metadata in VideoFactory. Do not search, download, alter the timeline, or render in selection mode. Tests must mock Codex. Downloads and external rendering belong to later versions.
+`--select-sources` reads the existing director plan and source requests, then writes only `source_selection.json`. The default `--selector rule` is deterministic and conservative; `--selector codex` requires explicit opt-in and one sandboxed, read-only Codex call with compact metadata. Reject candidates when semantic evidence or source duration is insufficient. Treat Pexels URL slugs as clues, not verified content; never infer nationality from creator names. Validate selected IDs against the candidates for the same shot, and add runtime metadata in VideoFactory. Do not search, download, alter the timeline, or render in selection mode. Tests must mock Codex.
+
+## Selected Media Download V3B2
+
+`--download-sources` is the explicit network download command. It reads saved selections, downloads each unique selected Pexels video once under `projects/<name>/media/broll/`, and records shot mapping, provenance, SHA-256, and ffprobe results in `download_manifest.json`. Require HTTPS, a verified certifi CA context, a size limit, `.part` staging, and validation before atomic promotion. Never send the Pexels API key to media hosts or overwrite an unrelated file. Reuse only files whose hashes match the existing manifest. Tests must mock HTTP and ffprobe; do not perform real downloads during implementation. External timeline integration and rendering belong to V3C.
 
 ## Project Data and Directories
 

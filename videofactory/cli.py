@@ -19,6 +19,8 @@ from .models import read_json, write_json
 from .paths import ROOT, ProjectPaths, safe_project_name
 from .progress import ProgressReporter
 from .renderer import render
+from .source_downloader import (DEFAULT_MAX_DOWNLOAD_MB, SelectedMediaDownloader,
+                                max_download_bytes, selected_assets)
 from .source_finder import find_sources
 from .source_provider import LocalSourceProvider, PexelsSourceProvider
 from .source_selection import build_selection_context, validate_selection
@@ -67,6 +69,10 @@ def parser() -> argparse.ArgumentParser:
     result.add_argument("--selector-model", help="Optional Codex selector model")
     result.add_argument("--selector-timeout", type=float, default=300,
                         help="Codex selector subprocess timeout in seconds (default: 300)")
+    result.add_argument("--download-sources", action="store_true",
+                        help="Download only selected unique source videos for an existing project")
+    result.add_argument("--max-download-mb", type=float, default=DEFAULT_MAX_DOWNLOAD_MB,
+                        help="Hard per-asset download limit in MiB (default: 500)")
     result.add_argument("--fixture-transcript", type=Path,
                         help="Deterministic JSON transcript; bypasses MLX Whisper")
     result.add_argument("--whisper-model", "--mlx-model", dest="whisper_model",
@@ -183,6 +189,41 @@ def run_select_sources(args: argparse.Namespace) -> Path:
     return destination
 
 
+def run_download_sources(args: argparse.Namespace) -> Path:
+    name = safe_project_name(args.project)
+    paths = ProjectPaths(ROOT, name)
+    progress = ProgressReporter(5)
+    progress.start(1, "Loading source candidates")
+    source_path = paths.project / "sources.json"
+    if not source_path.is_file():
+        raise FileNotFoundError(f"Existing project needs {source_path}")
+    sources = read_json(source_path)
+    validate_sources_document(sources, name)
+    progress.complete(1, "Source candidate loading")
+    progress.start(2, "Loading source selection")
+    selection_path = paths.project / "source_selection.json"
+    if not selection_path.is_file():
+        raise FileNotFoundError(f"Existing project needs {selection_path}")
+    selection = read_json(selection_path)
+    plan_path = paths.project / "director_plan.json"
+    if not plan_path.is_file():
+        raise FileNotFoundError(f"Existing project needs {plan_path}")
+    plan = read_json(plan_path)
+    progress.complete(2, "Source selection loading")
+    progress.start(3, "Resolving selected assets")
+    selected_assets(plan, sources, selection)
+    downloader = SelectedMediaDownloader(max_download_mb=args.max_download_mb)
+    progress.complete(3, "Selected asset resolution")
+    progress.start(4, "Downloading and validating media")
+    def begin_save() -> None:
+        progress.complete(4, "Media download and validation")
+        progress.start(5, "Saving download_manifest.json")
+    downloader.run(paths.project, plan, sources, selection,
+                   report=lambda message: print(f"      {message}", flush=True), before_save=begin_save)
+    progress.complete(5, "Download manifest save")
+    return paths.project / "download_manifest.json"
+
+
 def run(args: argparse.Namespace) -> dict:
     name = safe_project_name(args.project)
     mode = "TALKING_HEAD" if args.video else "VOICEOVER"
@@ -244,21 +285,27 @@ def run(args: argparse.Namespace) -> dict:
 def main(argv: list[str] | None = None) -> int:
     command_parser = parser()
     args = command_parser.parse_args(argv)
+    workflows = sum((args.plan_only, args.find_sources, args.select_sources, args.download_sources))
+    if workflows > 1:
+        command_parser.error("Choose only one of --plan-only, --find-sources, --select-sources, or --download-sources")
     if args.find_sources:
-        if args.plan_only or args.select_sources or args.video or args.voice or args.fixture_transcript:
+        if args.video or args.voice or args.fixture_transcript:
             command_parser.error("--find-sources uses an existing project and cannot take source, fixture, or --plan-only arguments")
         if not args.source_provider:
             command_parser.error("--find-sources requires --source-provider local or pexels")
     elif args.select_sources:
-        if args.plan_only or args.video or args.voice or args.fixture_transcript:
+        if args.video or args.voice or args.fixture_transcript:
             command_parser.error("--select-sources uses an existing project and cannot take source, fixture, or --plan-only arguments")
+    elif args.download_sources:
+        if args.video or args.voice or args.fixture_transcript:
+            command_parser.error("--download-sources uses an existing project and cannot take source or fixture arguments")
     elif args.source_provider:
         command_parser.error("--source-provider requires --find-sources")
     elif args.plan_only:
         if args.video or args.voice or args.fixture_transcript:
             command_parser.error("--plan-only uses an existing project and cannot take source or fixture arguments")
     elif not (args.video or args.voice):
-        command_parser.error("one of --video or --voice is required unless --plan-only, --find-sources, or --select-sources is used")
+        command_parser.error("one of --video or --voice is required unless an existing-project workflow is used")
     if not 1 <= args.source_limit <= 20:
         command_parser.error("--source-limit must be between 1 and 20")
     if args.source_provider and not args.find_sources:
@@ -267,7 +314,16 @@ def main(argv: list[str] | None = None) -> int:
         command_parser.error("--selector codex requires --select-sources")
     if (args.selector_model or args.selector_timeout != 300) and not args.select_sources:
         command_parser.error("--selector-model and --selector-timeout require --select-sources")
+    if args.max_download_mb != DEFAULT_MAX_DOWNLOAD_MB and not args.download_sources:
+        command_parser.error("--max-download-mb requires --download-sources")
     try:
+        max_download_bytes(args.max_download_mb)
+    except ValueError as exc:
+        command_parser.error(str(exc))
+    try:
+        if args.download_sources:
+            print(f"Download manifest saved: {run_download_sources(args)}")
+            return 0
         if args.select_sources:
             print(f"Source selection saved: {run_select_sources(args)}")
             return 0
