@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 from pathlib import Path
 from typing import Any, Callable
@@ -25,7 +26,8 @@ MANIFEST_SCHEMA = ROOT / "config" / "speech_render_manifest.schema.json"
 def build_speech_render_command(retimed: dict[str, Any], project_dir: Path, destination: Path,
                                 primary_info: dict[str, Any],
                                 visual_sources: dict[Path, dict[str, Any]],
-                                encoder: str = "libx264") -> list[str]:
+                                encoder: str = "libx264",
+                                primary_scales: list[float] | None = None) -> list[str]:
     if encoder not in {"libx264", "h264_videotoolbox"}:
         raise ValueError(f"Unsupported H.264 encoder: {encoder}")
     videos, audios = _streams(primary_info, "video"), _streams(primary_info, "audio")
@@ -34,6 +36,12 @@ def build_speech_render_command(retimed: dict[str, Any], project_dir: Path, dest
     if retimed["base_video"]["keep_segments"] != retimed["base_audio"]["keep_segments"]:
         raise ValueError("Primary video and audio keep segments differ")
     keeps = retimed["base_video"]["keep_segments"]
+    if primary_scales is not None:
+        if len(primary_scales) != len(keeps) or any(
+            isinstance(scale, bool) or not isinstance(scale, (int, float)) or
+            not math.isfinite(scale) or not 1 <= scale <= 1.20 for scale in primary_scales
+        ):
+            raise ValueError("Invalid primary segment framing scales")
     command = [str(FFMPEG), "-hide_banner", "-loglevel", "error", "-nostdin", "-n",
                "-i", retimed["base_video"]["source_path"]]
     sources = list(visual_sources)
@@ -49,9 +57,17 @@ def build_speech_render_command(retimed: dict[str, Any], project_dir: Path, dest
         video_input = f"[vsrc{i}]" if count > 1 else f"[0:{videos[0]['index']}]"
         audio_input = f"[asrc{i}]" if count > 1 else f"[0:{audios[0]['index']}]"
         start, end = _number(keep["source_start"]), _number(keep["source_end"])
-        filters.append(f"{video_input}trim=start={start}:end={end},setpts=PTS-STARTPTS,"
-                       f"fps={FPS},scale={WIDTH}:{HEIGHT}:force_original_aspect_ratio=increase,"
-                       f"crop={WIDTH}:{HEIGHT},setsar=1,format=yuv420p[vkeep{i}]")
+        video_filter = (f"{video_input}trim=start={start}:end={end},setpts=PTS-STARTPTS,"
+                        f"fps={FPS},scale={WIDTH}:{HEIGHT}:force_original_aspect_ratio=increase,"
+                        f"crop={WIDTH}:{HEIGHT},setsar=1,format=yuv420p")
+        scale = primary_scales[i] if primary_scales is not None else 1.0
+        if scale > 1:
+            # -2 derives an even height from the width while preserving aspect ratio.
+            punch_width = math.ceil(WIDTH * scale / 2) * 2
+            video_filter += (f",scale={punch_width}:-2,"
+                             f"crop={WIDTH}:{HEIGHT}:(iw-{WIDTH})/2:(ih-{HEIGHT})/2,"
+                             "setsar=1,format=yuv420p")
+        filters.append(f"{video_filter}[vkeep{i}]")
         filters.append(f"{audio_input}atrim=start={start}:end={end},"
                        f"asetpts=PTS-STARTPTS,aresample=48000[akeep{i}]")
     if count > 1:

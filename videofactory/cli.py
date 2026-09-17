@@ -21,6 +21,9 @@ from .edit_timeline import build_edit_timeline, validate_edit_timeline
 from .edit_renderer import EditRenderer
 from .retimed_edit import build_retimed_edit_timeline
 from .speech_renderer import SpeechEditRenderer
+from .jump_cut_style import (build_jump_cut_style_plan, build_styled_edit_timeline,
+                             validate_punch_in_scale)
+from .punch_in_renderer import PunchInRenderer
 from .media_probe import duration as probe_duration
 from .media_probe import probe, stream
 from .models import read_json, write_json
@@ -93,6 +96,10 @@ def parser() -> argparse.ArgumentParser:
                         help="Plan conservative speech-gap cuts and a canonical time map without rendering")
     result.add_argument("--render-speech-edits", action="store_true",
                         help="Render the saved speech-shortened layered edit to speech_edited_draft.mp4")
+    result.add_argument("--render-punch-ins", action="store_true",
+                        help="Render static alternating primary framing to punch_in_draft.mp4")
+    result.add_argument("--punch-in-scale", type=float, default=1.08,
+                        help="Static framing scale on alternating primary segments (default: 1.08)")
     result.add_argument("--pause-threshold-seconds", type=float, default=1.0,
                         help="Minimum detected audio silence to consider for shortening (default: 1.0)")
     result.add_argument("--pause-keep-seconds", type=float, default=0.25,
@@ -453,6 +460,66 @@ def run_render_speech_edits(args: argparse.Namespace) -> Path:
     return final
 
 
+def run_render_punch_ins(args: argparse.Namespace) -> Path:
+    name = safe_project_name(args.project)
+    paths = ProjectPaths(ROOT, name)
+    final = paths.output / "punch_in_draft.mp4"
+    if final.exists() and not args.overwrite_render:
+        raise FileExistsError(f"Punch-in draft already exists: {final}; use --overwrite-render")
+    progress = ProgressReporter(6)
+    progress.start(1, "Loading retimed edit artifacts")
+    required = ("project.json", "transcript.json", "director_plan.json", "clip_plan.json",
+                "edit_timeline.json", "download_manifest.json", "speech_edit_plan.json",
+                "retime_map.json", "retimed_edit_timeline.json")
+    for filename in required:
+        if not (paths.project / filename).is_file():
+            raise FileNotFoundError(f"Existing project needs {paths.project / filename}")
+    project = read_json(paths.project / "project.json")
+    transcript = read_json(paths.project / "transcript.json")
+    director_plan = read_json(paths.project / "director_plan.json")
+    clip_plan = read_json(paths.project / "clip_plan.json")
+    timeline = read_json(paths.project / "edit_timeline.json")
+    download_manifest = validate_manifest(read_json(paths.project / "download_manifest.json"), name)
+    speech_plan = read_json(paths.project / "speech_edit_plan.json")
+    retime_map = read_json(paths.project / "retime_map.json")
+    retimed = read_json(paths.project / "retimed_edit_timeline.json")
+    validate_plan(director_plan, name, timeline["duration"], project["mode"])
+    canonical = build_retimed_edit_timeline(project, transcript, director_plan, clip_plan,
+                                             timeline, speech_plan, retime_map, paths.project)
+    if retimed != canonical:
+        raise ValueError("Saved retimed edit timeline differs from canonical transformation")
+    progress.complete(1, "Retimed edit artifact loading")
+    progress.start(2, "Building jump-cut style plan")
+    style_plan = build_jump_cut_style_plan(retimed, args.punch_in_scale)
+    progress.complete(2, "Jump-cut style plan construction")
+    progress.start(3, "Building styled edit timeline")
+    styled = build_styled_edit_timeline(retimed, style_plan)
+    for segment in style_plan["segments"]:
+        print(f"      A-roll segment {segment['segment_index']}: "
+              f"{segment['edited_start']:.3f}-{segment['edited_end']:.3f} "
+              f"scale {segment['scale']:.2f}", flush=True)
+    for overlay in styled["visual_overlays"]:
+        print(f"      B-roll shot {overlay['shot_id']} piece {overlay['segment_index']}: "
+              f"{overlay['timeline_start']:.3f}-{overlay['timeline_end']:.3f}", flush=True)
+    write_json(paths.project / "jump_cut_style_plan.json", style_plan)
+    write_json(paths.project / "styled_edit_timeline.json", styled)
+    progress.complete(3, "Styled edit timeline construction")
+    progress.start(4, "Building FFmpeg render graph")
+    def begin_render() -> None:
+        progress.complete(4, "FFmpeg render graph construction")
+        progress.start(5, "Rendering punch-in draft")
+    def begin_validate() -> None:
+        progress.complete(5, "Punch-in draft rendering")
+        progress.start(6, "Validating and saving render result")
+    PunchInRenderer().render(paths.project, paths.output, project, transcript, director_plan,
+                             clip_plan, timeline, download_manifest, speech_plan, retime_map,
+                             retimed, style_plan, styled, encoder=args.encoder,
+                             overwrite=args.overwrite_render, before_render=begin_render,
+                             before_validate=begin_validate)
+    progress.complete(6, "Punch-in render validation and save")
+    return final
+
+
 def run(args: argparse.Namespace) -> dict:
     name = safe_project_name(args.project)
     mode = "TALKING_HEAD" if args.video else "VOICEOVER"
@@ -514,9 +581,10 @@ def run(args: argparse.Namespace) -> dict:
 def main(argv: list[str] | None = None) -> int:
     command_parser = parser()
     args = command_parser.parse_args(argv)
+    supplied_args = argv if argv is not None else sys.argv[1:]
     workflows = sum((args.plan_only, args.find_sources, args.select_sources,
                      args.download_sources, args.build_edit_timeline, args.render_edit,
-                     args.plan_speech_edits, args.render_speech_edits))
+                     args.plan_speech_edits, args.render_speech_edits, args.render_punch_ins))
     if workflows > 1:
         command_parser.error("Choose only one existing-project workflow")
     if args.find_sources:
@@ -542,6 +610,9 @@ def main(argv: list[str] | None = None) -> int:
     elif args.render_speech_edits:
         if args.video or args.voice or args.fixture_transcript:
             command_parser.error("--render-speech-edits uses an existing project and cannot take source or fixture arguments")
+    elif args.render_punch_ins:
+        if args.video or args.voice or args.fixture_transcript:
+            command_parser.error("--render-punch-ins uses an existing project and cannot take source or fixture arguments")
     elif args.source_provider:
         command_parser.error("--source-provider requires --find-sources")
     elif args.plan_only:
@@ -567,9 +638,13 @@ def main(argv: list[str] | None = None) -> int:
          args.silence_noise_db != -35.0)
             and not args.plan_speech_edits):
         command_parser.error("Silence and pause options require --plan-speech-edits")
+    if any(item == "--punch-in-scale" or item.startswith("--punch-in-scale=")
+           for item in supplied_args) and not args.render_punch_ins:
+        command_parser.error("--punch-in-scale requires --render-punch-ins")
     try:
         validate_parameters(args.pause_threshold_seconds, args.pause_keep_seconds)
         validate_noise_db(args.silence_noise_db)
+        validate_punch_in_scale(args.punch_in_scale)
     except ValueError as exc:
         command_parser.error(str(exc))
     try:
@@ -582,6 +657,9 @@ def main(argv: list[str] | None = None) -> int:
     except ValueError as exc:
         command_parser.error(str(exc))
     try:
+        if args.render_punch_ins:
+            print(f"Punch-in draft rendered and validated: {run_render_punch_ins(args)}")
+            return 0
         if args.render_speech_edits:
             print(f"Speech-edited draft rendered and validated: {run_render_speech_edits(args)}")
             return 0

@@ -162,6 +162,16 @@ V4B consumes the saved V4A plan and map; it does not detect silence again. It bu
 
 The renderer trims every canonical keep segment from both primary video and primary audio and concatenates them in the same order. It maps B-roll through intersections with those keep segments. A B-roll overlay crossing a removed interval becomes separate pieces with advancing source ranges, so the footage is cut rather than stretched or restarted. B-roll audio remains muted. V4B writes `output/<name>/speech_edited_draft.mp4` and `projects/<name>/speech_render_manifest.json`; the V3D `edited_draft.mp4` remains separate. `--overwrite-render` applies only to the speech-edited output in this mode.
 
+### V4C static jump-cut framing
+
+V4C styles the existing V4B primary keep segments with a deterministic 100% / 108% / 100% / 108% framing pattern. The default `--punch-in-scale` is `1.08`; allowed values are greater than 1.0 and at most 1.20. Framing is static within each segment and uses a center crop after the proven 1920×1080 primary normalization. The same canonical segments drive unchanged primary audio. B-roll positions, source ranges, and muted audio policy are copied exactly from `retimed_edit_timeline.json`.
+
+```sh
+./.venv/bin/python factory.py --project real_test_large_001 --render-punch-ins --punch-in-scale 1.08 --encoder libx264
+```
+
+The command writes `projects/<name>/jump_cut_style_plan.json`, `styled_edit_timeline.json`, and `punch_in_render_manifest.json`, and renders `output/<name>/punch_in_draft.mp4`. Existing V3D and V4B drafts stay separate. V4C does not yet add face tracking, animated zoom, subtitles, music, or transitions.
+
 Inspect the plan and map before any timing changes to media:
 
 ```sh
