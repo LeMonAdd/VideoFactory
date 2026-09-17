@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "VideoFactory DirectorPlan",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "project_name", "shots"],
+  "properties": {
+    "schema_version": {"type": "integer", "const": 1},
+    "project_name": {"type": "string", "minLength": 1},
+    "shots": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "start", "end", "visual_type", "visual_query", "reason"],
+        "properties": {
+          "id": {"type": "integer", "minimum": 1},
+          "start": {"type": "number", "minimum": 0},
+          "end": {"type": "number", "exclusiveMinimum": 0},
+          "visual_type": {
+            "type": "string",
+            "enum": ["A_ROLL", "B_ROLL", "IMAGE", "GRAPHIC"]
+          },
+          "visual_query": {
+            "oneOf": [
+              {"type": "string", "minLength": 1},
+              {"type": "null"}
+            ]
+          },
+          "reason": {"type": "string", "minLength": 1}
+        }
+      }
+    },
+    "metadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["provider", "model", "invocation_count", "elapsed_seconds"],
+      "properties": {
+        "provider": {"type": "string", "enum": ["rule", "codex"]},
+        "model": {"type": ["string", "null"]},
+        "invocation_count": {"type": "integer", "minimum": 0},
+        "elapsed_seconds": {"type": "number", "minimum": 0}
+      }
+    }
+  }
+}

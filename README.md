@@ -1,12 +1,14 @@
 # VideoFactory
 
-VideoFactory V1 is a local automated video-editing pipeline for macOS Apple Silicon. It turns narration and local visuals into a 1920×1080, 30 fps H.264/AAC draft. It uses Python 3.12, FFmpeg/ffprobe, and local MLX Whisper for real transcription. Fixture transcripts let the rest of the pipeline run without Metal.
+VideoFactory is a local automated video-editing pipeline for macOS Apple Silicon. It turns narration and local visuals into a 1920×1080, 30 fps H.264/AAC draft. Python 3.12, FFmpeg/ffprobe, and local MLX Whisper handle media and transcription. V2A adds an editorial DirectorPlan; V3A searches for external media candidates without downloading or rendering them. Fixture transcripts keep automated tests independent of Metal.
 
 ## Architecture
 
-`factory.py` orchestrates independent stages: input validation → ffprobe → narration extraction → transcription → transcript normalization → deterministic scene planning → local asset selection → timeline creation → FFmpeg rendering → ffprobe validation. The modules live in `videofactory/`. The persisted `timeline.json` is the authority for an edit; `scripts/render_timeline.py` renders it again without transcription or scene planning.
+`factory.py` orchestrates independent stages: input validation → ffprobe → narration extraction → transcription → transcript normalization → DirectorPlan → local asset resolution → scenes → timeline → FFmpeg rendering → ffprobe validation. The modules live in `videofactory/`. `director_plan.json` records what should appear; `timeline.json` records the actual sources and timing used to render. The separate V3A Source Finder reads `director_plan.json` and writes candidate requests to `sources.json`; it does not change the timeline. `scripts/render_timeline.py` can replay a saved edit.
 
-**TALKING_HEAD** reads a video with narration. Its original audio runs continuously while the picture alternates between A-roll and local B-roll when available. With no supporting assets, the video remains A-roll. **VOICEOVER** reads narration audio and builds visuals from local B-roll, still images, or a plain graphic placeholder. V1 scene decisions are deterministic, not AI generated.
+**TALKING_HEAD** reads a video with narration. Its original audio runs continuously while the picture may switch between presenter footage and explicitly matched local visuals. Uncovered intervals and unresolved visual requests remain A-roll. **VOICEOVER** reads narration audio and uses local B-roll, still images, or a plain graphic placeholder. Unresolved VOICEOVER requests become graphic placeholders.
+
+The default `--director rule` uses deterministic offline rules. `--director codex` is opt-in and uses the installed Codex CLI and the user's existing authentication. It sends only project mode, language, duration, transcript timestamps and words, editorial rules, and the expected response shape. It does not send source video or repository code. The Codex process runs once per short project with `--ephemeral --sandbox read-only` in an isolated temporary directory. Codex receives the structure-only `config/codex_director_output.schema.json`; VideoFactory separately validates timing and editorial rules against `config/director_plan.schema.json`, snaps nearby cuts to word boundaries, and adds provider metadata before saving.
 
 ## Directories
 
@@ -15,14 +17,14 @@ VideoFactory V1 is a local automated video-editing pipeline for macOS Apple Sili
 | `inbox/` | Your input video or audio (ignored by Git) |
 | `assets/broll/`, `assets/images/` | Reusable local visuals |
 | `assets/music/` | Reserved for a future version |
-| `projects/<name>/` | Persistent JSON editing state |
+| `projects/<name>/` | Persistent JSON editing state, including DirectorPlan |
 | `temp/<name>/` | Extracted audio and other intermediates |
 | `output/<name>/draft.mp4` | Rendered draft |
 | `tests/`, `scripts/` | Tests and synthetic integration utility |
 
 ## Setup and commands
 
-Use the repository virtual environment explicitly. Install the project's Python requirements into it only if missing; the V1 pipeline itself uses the standard library, while real transcription requires the existing `mlx_whisper` installation and tests require `pytest`. FFmpeg and ffprobe must be available at `/opt/homebrew/bin/ffmpeg` and `/opt/homebrew/bin/ffprobe`. A real MLX run needs host Metal access. The default real transcription model is `mlx-community/whisper-large-v3-turbo`, configured in `config/transcription.json`. MLX Whisper uses a cached model when present; otherwise Hugging Face may download it on the first run. VideoFactory inherits Hugging Face environment settings from the host shell without changing them.
+Use the repository virtual environment explicitly. Install Python dependencies with `./.venv/bin/python -m pip install -r requirements-dev.txt` if missing. V2A uses `jsonschema` for strict plan validation; real transcription also requires the existing `mlx_whisper` installation. FFmpeg and ffprobe must be available at `/opt/homebrew/bin/ffmpeg` and `/opt/homebrew/bin/ffprobe`. A real MLX run needs host Metal access. The default real transcription model is `mlx-community/whisper-large-v3-turbo`, configured in `config/transcription.json`. MLX Whisper uses a cached model when present; otherwise Hugging Face may download it on the first run. VideoFactory inherits Hugging Face environment settings from the host shell without changing them.
 
 First real talking-head test:
 
@@ -46,6 +48,36 @@ To bypass MLX for a deterministic test:
 
 Fixture segment times must fit the source duration. An optional `--assets-dir PATH` points to another local directory containing `broll/` and `images/`.
 
+### Director and plan-only commands
+
+```sh
+./.venv/bin/python factory.py --video inbox/talking_head.mp4 --project demo --director rule
+./.venv/bin/python factory.py --project demo --director rule --plan-only
+./.venv/bin/python factory.py --project real_test_large_001 --director codex --plan-only
+```
+
+Normal new projects still require `--video` or `--voice`. `--plan-only` requires an existing `project.json` and `transcript.json`; it updates only `director_plan.json` and does not transcribe or render. Codex use requires the explicit `--director codex` flag. Optional `--director-model MODEL` overrides the user's Codex default, and `--director-timeout SECONDS` changes the 300-second subprocess timeout. Stage progress prints and flushes immediately, with elapsed time on completion.
+
+B-roll and image requests are editorial intent until a local asset is explicitly tagged with the same query. For example, place `tokyo.mp4` in `assets/broll/` and add `tokyo.mp4.json` beside it:
+
+```json
+{"schema_version": 1, "visual_queries": ["modern Tokyo skyline and busy city streets"]}
+```
+
+Without that exact local description, VideoFactory keeps the query as `unresolved_local_asset` in `scenes.json` and renders A-roll or a graphic placeholder. It does not guess a match from a filename or fetch media.
+
+### V3A source candidate search
+
+For an existing project with `director_plan.json`, set `PEXELS_API_KEY` in your shell environment and run:
+
+```sh
+./.venv/bin/python factory.py --project real_test_large_001 --find-sources --source-provider pexels --source-limit 5
+```
+
+The Pexels provider searches B-roll video queries through the [Pexels video search API](https://www.pexels.com/api/documentation/), requests landscape results, and reuses results for repeated queries. `--source-limit` accepts 1–20; the default is 5. A-roll and graphics are skipped; Pexels image search is not implemented. `--source-provider local` searches only assets whose sidecar `visual_queries` explicitly match. Source search updates `sources.json` only; it does not transcribe, invoke Codex, download, select, or render media. External API calls occur only when this Pexels command is explicitly requested.
+
+Each request records `FOUND`, `NO_RESULTS`, `SKIPPED`, or `ERROR` and an unselected candidate list. Candidate metadata includes the original page, creator and profile when supplied, file variants, and the [Pexels License](https://www.pexels.com/license/) link. Keep those links and creator details with any media selected in a future version; check the license and attribution requirements before publication. `PEXELS_API_KEY` is read only from the environment and is never saved in project JSON. V3B candidate selection, downloads, timeline integration, and rendering remain future work.
+
 ## Tests and synthetic integration
 
 ```sh
@@ -54,12 +86,12 @@ Fixture segment times must fit the source duration. An optional `--assets-dir PA
 /opt/homebrew/bin/ffprobe -v error -show_format -show_streams -of json output/synthetic_v1/draft.mp4
 ```
 
-The integration utility generates a red talking-head placeholder with continuous tone audio, plus blue and green B-roll clips. Its five timed fixture segments produce A-roll → B-roll → A-roll → B-roll → A-roll. Generated source media stays under `temp/`; the draft stays under `output/`. Neither is tracked by Git. The script overwrites only its generated draft when rerun.
+The integration utility generates a red talking-head placeholder with continuous tone audio, plus blue and green B-roll clips with explicit local query sidecars. Its five timed fixture segments produce A-roll → B-roll → A-roll → B-roll → A-roll through the offline rule provider. Generated source media stays under `temp/`; the draft stays under `output/`. Neither is tracked by Git. The script overwrites only its generated draft when rerun.
 
 Replay a saved edit with `./.venv/bin/python scripts/render_timeline.py --project synthetic_v1`. This writes `output/synthetic_v1/replay.mp4` and refuses to overwrite an existing replay unless `--overwrite-render` is supplied.
 
 ## Project state
 
-Every `projects/<name>/` directory contains `project.json` (mode, input, settings), `transcript.json` (normalized timed segments and optional words), `scenes.json` (visual decisions), `sources.json` (source metadata and future provenance fields), and `timeline.json` (exact visual events and continuous narration source). Each document has `schema_version`. Paths in project state are absolute local paths, so reproducing an edit requires the referenced media to remain available.
+Every new `projects/<name>/` directory contains `project.json` (mode, input, settings), `transcript.json` (normalized timed segments and optional words), `director_plan.json` (editorial shots, reasons, provider/model, invocation count and elapsed time), `scenes.json` (resolved visuals or preserved unresolved queries), `sources.json` (local source metadata plus optional V3A search requests), and `timeline.json` (exact visual events and continuous narration source). Each document has `schema_version`. Paths in project state are absolute local paths, so reproducing an edit requires the referenced media to remain available.
 
-V1 does not download media, search the web, select music, style subtitles, publish videos, or use external AI APIs. An AI Director and richer graphics are future work.
+V3A discovers candidates only. It does not download media, select music, style subtitles, publish videos, or generate images.

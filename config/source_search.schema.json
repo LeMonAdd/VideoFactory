@@ -1,0 +1,71 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "VideoFactory V3A Source Search",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "project_name", "provider", "sources", "requests"],
+  "properties": {
+    "schema_version": {"type": "integer", "const": 1},
+    "project_name": {"type": "string", "minLength": 1},
+    "provider": {"type": "string", "enum": ["local", "pexels"]},
+    "sources": {"type": "array", "items": {"type": "object"}},
+    "requests": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["shot_id", "visual_type", "visual_query", "media_type", "status", "candidates", "error", "reused_from_shot_id"],
+        "properties": {
+          "shot_id": {"type": "integer", "minimum": 1},
+          "visual_type": {"type": "string", "enum": ["A_ROLL", "B_ROLL", "IMAGE", "GRAPHIC"]},
+          "visual_query": {"type": ["string", "null"]},
+          "media_type": {"type": ["string", "null"], "enum": ["VIDEO", "IMAGE", null]},
+          "status": {"type": "string", "enum": ["FOUND", "NO_RESULTS", "SKIPPED", "ERROR"]},
+          "error": {"type": ["string", "null"]},
+          "reused_from_shot_id": {"type": ["integer", "null"]},
+          "candidates": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["candidate_id", "provider", "provider_asset_id", "media_type", "query", "page_url", "preview_url", "creator", "creator_url", "license", "license_url", "width", "height", "duration", "orientation", "files", "local_path"],
+              "properties": {
+                "candidate_id": {"type": "string", "minLength": 1},
+                "provider": {"type": "string", "enum": ["local", "pexels"]},
+                "provider_asset_id": {"type": "string", "minLength": 1},
+                "media_type": {"type": "string", "enum": ["VIDEO", "IMAGE"]},
+                "query": {"type": "string", "minLength": 1},
+                "page_url": {"type": ["string", "null"]},
+                "preview_url": {"type": ["string", "null"]},
+                "creator": {"type": ["string", "null"]},
+                "creator_url": {"type": ["string", "null"]},
+                "license": {"type": ["string", "null"]},
+                "license_url": {"type": ["string", "null"]},
+                "width": {"type": ["integer", "null"], "minimum": 1},
+                "height": {"type": ["integer", "null"], "minimum": 1},
+                "duration": {"type": ["number", "null"], "minimum": 0},
+                "orientation": {"type": ["string", "null"], "enum": ["landscape", "portrait", "square", null]},
+                "local_path": {"type": ["string", "null"]},
+                "files": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": ["url", "width", "height", "quality", "file_type"],
+                    "properties": {
+                      "url": {"type": "string", "minLength": 1},
+                      "width": {"type": ["integer", "null"], "minimum": 1},
+                      "height": {"type": ["integer", "null"], "minimum": 1},
+                      "quality": {"type": ["string", "null"]},
+                      "file_type": {"type": ["string", "null"]}
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

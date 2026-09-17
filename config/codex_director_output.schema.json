@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "VideoFactory Codex Director Output",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "project_name", "shots"],
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "enum": [1]
+    },
+    "project_name": {
+      "type": "string"
+    },
+    "shots": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "start", "end", "visual_type", "visual_query", "reason"],
+        "properties": {
+          "id": {"type": "integer"},
+          "start": {"type": "number"},
+          "end": {"type": "number"},
+          "visual_type": {
+            "type": "string",
+            "enum": ["A_ROLL", "B_ROLL", "IMAGE", "GRAPHIC"]
+          },
+          "visual_query": {"type": ["string", "null"]},
+          "reason": {"type": "string"}
+        }
+      }
+    }
+  }
+}
