@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "VideoFactory Edited Render Manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "project_name", "input_edit_timeline", "output_path", "encoder", "width", "height", "fps", "duration", "video_codec", "audio_codec", "video_streams", "audio_streams", "broll_overlay_count", "metadata_stripped", "file_size_bytes", "sha256"],
+  "properties": {
+    "schema_version": {"type": "integer", "const": 1},
+    "project_name": {"type": "string", "minLength": 1},
+    "input_edit_timeline": {"type": "string", "const": "edit_timeline.json"},
+    "output_path": {"type": "string", "minLength": 1},
+    "encoder": {"type": "string", "enum": ["libx264", "h264_videotoolbox"]},
+    "width": {"type": "integer", "const": 1920},
+    "height": {"type": "integer", "const": 1080},
+    "fps": {"type": "number", "minimum": 29.9, "maximum": 30.1},
+    "duration": {"type": "number", "exclusiveMinimum": 0},
+    "video_codec": {"type": "string", "const": "h264"},
+    "audio_codec": {"type": "string", "const": "aac"},
+    "video_streams": {"type": "integer", "const": 1},
+    "audio_streams": {"type": "integer", "const": 1},
+    "broll_overlay_count": {"type": "integer", "minimum": 0},
+    "metadata_stripped": {"type": "boolean", "const": true},
+    "file_size_bytes": {"type": "integer", "minimum": 1},
+    "sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"}
+  }
+}

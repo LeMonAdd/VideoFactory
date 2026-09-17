@@ -18,6 +18,7 @@ from .director_scenes import convert_plan_to_scenes
 from .director_service import create_director_plan
 from .input_handler import inspect_input
 from .edit_timeline import build_edit_timeline, validate_edit_timeline
+from .edit_renderer import EditRenderer
 from .media_probe import duration as probe_duration
 from .media_probe import probe, stream
 from .models import read_json, write_json
@@ -80,6 +81,8 @@ def parser() -> argparse.ArgumentParser:
                         help="Hard per-asset download limit in MiB (default: 500)")
     result.add_argument("--build-edit-timeline", action="store_true",
                         help="Plan local B-roll source ranges and a layered edit timeline; no render")
+    result.add_argument("--render-edit", action="store_true",
+                        help="Render the saved layered edit timeline to edited_draft.mp4")
     result.add_argument("--source-margin-seconds", type=float, default=0.5,
                         help="Preferred head/tail margin for source clips (default: 0.5)")
     result.add_argument("--fixture-transcript", type=Path,
@@ -93,7 +96,7 @@ def parser() -> argparse.ArgumentParser:
     result.add_argument("--encoder", choices=["libx264", "h264_videotoolbox"],
                         default="libx264", help="H.264 encoder (default: libx264)")
     result.add_argument("--overwrite-render", action="store_true",
-                        help="Replace an existing generated draft.mp4")
+                        help="Replace an existing generated output for the selected render mode")
     return result
 
 
@@ -297,6 +300,45 @@ def run_build_edit_timeline(args: argparse.Namespace) -> tuple[Path, Path]:
     return clip_path, edit_path
 
 
+def run_render_edit(args: argparse.Namespace) -> Path:
+    name = safe_project_name(args.project)
+    paths = ProjectPaths(ROOT, name)
+    progress = ProgressReporter(5)
+    progress.start(1, "Loading edit timeline")
+    required = ("project.json", "director_plan.json", "clip_plan.json", "edit_timeline.json",
+                "download_manifest.json")
+    for filename in required:
+        if not (paths.project / filename).is_file():
+            raise FileNotFoundError(f"Existing project needs {paths.project / filename}")
+    project = read_json(paths.project / "project.json")
+    plan = read_json(paths.project / "director_plan.json")
+    clips = read_json(paths.project / "clip_plan.json")
+    timeline = read_json(paths.project / "edit_timeline.json")
+    manifest = validate_manifest(read_json(paths.project / "download_manifest.json"), name)
+    if project.get("project_name") != name or project.get("mode") not in {"TALKING_HEAD", "VOICEOVER"}:
+        raise ValueError("Existing project.json has a mismatched name or invalid mode")
+    progress.complete(1, "Edit timeline loading")
+    progress.start(2, "Validating render inputs")
+    validate_plan(plan, name, timeline["duration"], project["mode"])
+    validate_edit_timeline(timeline, project, plan, clips, paths.project)
+    if project["mode"] != "TALKING_HEAD":
+        raise ValueError("VOICEOVER edit rendering requires a renderable base visual and is not yet supported by V3D")
+    progress.complete(2, "Render input validation")
+    progress.start(3, "Building FFmpeg render graph")
+    def begin_render() -> None:
+        progress.complete(3, "FFmpeg render graph creation")
+        progress.start(4, "Rendering edited draft")
+    def begin_save() -> None:
+        progress.complete(4, "Edited draft rendering")
+        progress.start(5, "Validating and saving render result")
+    EditRenderer().render(paths.project, paths.output, project, timeline, clips, plan, manifest,
+                          encoder=args.encoder, overwrite=args.overwrite_render,
+                          report=lambda message: print(f"      {message}", flush=True),
+                          before_render=begin_render, before_validate=begin_save)
+    progress.complete(5, "Render result validation and save")
+    return paths.output / "edited_draft.mp4"
+
+
 def run(args: argparse.Namespace) -> dict:
     name = safe_project_name(args.project)
     mode = "TALKING_HEAD" if args.video else "VOICEOVER"
@@ -359,7 +401,7 @@ def main(argv: list[str] | None = None) -> int:
     command_parser = parser()
     args = command_parser.parse_args(argv)
     workflows = sum((args.plan_only, args.find_sources, args.select_sources,
-                     args.download_sources, args.build_edit_timeline))
+                     args.download_sources, args.build_edit_timeline, args.render_edit))
     if workflows > 1:
         command_parser.error("Choose only one existing-project workflow")
     if args.find_sources:
@@ -376,6 +418,9 @@ def main(argv: list[str] | None = None) -> int:
     elif args.build_edit_timeline:
         if args.video or args.voice or args.fixture_transcript:
             command_parser.error("--build-edit-timeline uses an existing project and cannot take source or fixture arguments")
+    elif args.render_edit:
+        if args.video or args.voice or args.fixture_transcript:
+            command_parser.error("--render-edit uses an existing project and cannot take source or fixture arguments")
     elif args.source_provider:
         command_parser.error("--source-provider requires --find-sources")
     elif args.plan_only:
@@ -407,6 +452,9 @@ def main(argv: list[str] | None = None) -> int:
     except ValueError as exc:
         command_parser.error(str(exc))
     try:
+        if args.render_edit:
+            print(f"Edited draft rendered and validated: {run_render_edit(args)}")
+            return 0
         if args.download_sources:
             print(f"Download manifest saved: {run_download_sources(args)}")
             return 0
