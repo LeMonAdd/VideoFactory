@@ -1,10 +1,10 @@
 # VideoFactory
 
-VideoFactory is a local automated video-editing pipeline for macOS Apple Silicon. It turns narration and local visuals into a 1920×1080, 30 fps H.264/AAC draft. Python 3.12, FFmpeg/ffprobe, and local MLX Whisper handle media and transcription. V2A adds an editorial DirectorPlan; V3A searches external media candidates; V3B1 selects or rejects them; V3B2 downloads selected assets. Fixture transcripts keep automated tests independent of Metal.
+VideoFactory is a local automated video-editing pipeline for macOS Apple Silicon. It turns narration and local visuals into a 1920×1080, 30 fps H.264/AAC draft. Python 3.12, FFmpeg/ffprobe, and local MLX Whisper handle media and transcription. V2A adds an editorial DirectorPlan; V3A searches external media candidates; V3B1 selects or rejects them; V3B2 downloads selected assets; V3C plans source ranges and an edit timeline. Fixture transcripts keep automated tests independent of Metal.
 
 ## Architecture
 
-`factory.py` orchestrates independent stages: input validation → ffprobe → narration extraction → transcription → transcript normalization → DirectorPlan → local asset resolution → scenes → timeline → FFmpeg rendering → ffprobe validation. The modules live in `videofactory/`. `director_plan.json` records what should appear; `timeline.json` records the actual sources and timing used to render. The separate V3A Source Finder writes candidate requests to `sources.json`; V3B1 writes decisions to `source_selection.json`; V3B2 writes downloaded media and `download_manifest.json`. These stages do not change the timeline. `scripts/render_timeline.py` can replay a saved edit.
+`factory.py` orchestrates independent stages: input validation → ffprobe → narration extraction → transcription → transcript normalization → DirectorPlan → local asset resolution → scenes → timeline → FFmpeg rendering → ffprobe validation. The modules live in `videofactory/`. `director_plan.json` records what should appear; V1 `timeline.json` records actual local sources used to render. The separate V3A Source Finder writes candidate requests to `sources.json`; V3B1 writes decisions to `source_selection.json`; V3B2 writes downloaded media and `download_manifest.json`; V3C writes `clip_plan.json` and `edit_timeline.json`. V3C does not change the existing render timeline. `scripts/render_timeline.py` can replay a saved V1 edit.
 
 **TALKING_HEAD** reads a video with narration. Its original audio runs continuously while the picture may switch between presenter footage and explicitly matched local visuals. Uncovered intervals and unresolved visual requests remain A-roll. **VOICEOVER** reads narration audio and uses local B-roll, still images, or a plain graphic placeholder. Unresolved VOICEOVER requests become graphic placeholders.
 
@@ -107,7 +107,24 @@ Downloaded files live in `projects/<name>/media/broll/`. `download_manifest.json
 ./.venv/bin/python -m json.tool projects/real_test_large_001/download_manifest.json
 ```
 
-**Future V3C** will choose source in/out points and integrate downloaded assets into the final timeline and render. V3B2 does not transcode or render them.
+### V3C clip planning and layered edit timeline
+
+After selected media has been downloaded, run the offline planning command:
+
+```sh
+./.venv/bin/python factory.py --project real_test_large_001 --build-edit-timeline
+```
+
+This validates saved selections and local file hashes, then writes `clip_plan.json` with a result for every director shot. Selected B-roll receives a source in/out range matching the shot duration. The planner prefers a 0.5-second head/tail safety margin, reduces it when footage is tight, and spreads repeated uses of one asset across distinct non-overlapping ranges when possible. Use `--source-margin-seconds N` to change the preference. If a selected download is too short or absent from the manifest, TALKING_HEAD falls back to A-roll; a missing file named by a valid manifest is an error. VOICEOVER fallbacks are graphic placeholders.
+
+`edit_timeline.json` has continuous PRIMARY audio from 0 through the full probed project duration. TALKING_HEAD also has continuous PRIMARY video, including silent gaps before, between, and after director shots; selected B-roll is a visual overlay with its source audio disabled. VOICEOVER has no base video and explicitly uses graphic placeholders for uncovered intervals. Source paths are checked against the project directory, including symlink escapes. V3C chooses technically valid ranges without inspecting frames to find an ideal moment. **Future V3D** will composite and render this new timeline; the current renderer still uses V1 `timeline.json`.
+
+Inspect the plans without rendering:
+
+```sh
+./.venv/bin/python -m json.tool projects/real_test_large_001/clip_plan.json
+./.venv/bin/python -m json.tool projects/real_test_large_001/edit_timeline.json
+```
 
 ## Tests and synthetic integration
 
@@ -123,6 +140,6 @@ Replay a saved edit with `./.venv/bin/python scripts/render_timeline.py --projec
 
 ## Project state
 
-Every new `projects/<name>/` directory contains `project.json` (mode, input, settings), `transcript.json` (normalized timed segments and optional words), `director_plan.json` (editorial shots, reasons, provider/model, invocation count and elapsed time), `scenes.json` (resolved visuals or preserved unresolved queries), `sources.json` (local source metadata plus optional V3A search requests), and `timeline.json` (exact visual events and continuous narration source). Running V3B1 adds `source_selection.json`; V3B2 adds `download_manifest.json` and selected media. Neither is needed for the local V1 render. Each document has `schema_version`. Paths in project state are absolute local paths, so reproducing an edit requires the referenced media to remain available.
+Every new `projects/<name>/` directory contains `project.json` (mode, input, settings), `transcript.json` (normalized timed segments and optional words), `director_plan.json` (editorial shots, reasons, provider/model, invocation count and elapsed time), `scenes.json` (resolved visuals or preserved unresolved queries), `sources.json` (local source metadata plus optional V3A search requests), and `timeline.json` (exact visual events and continuous narration source). V3B1 adds `source_selection.json`; V3B2 adds `download_manifest.json` and selected media; V3C adds `clip_plan.json` and `edit_timeline.json`. These later files are not inputs to the V1 renderer. Every document has `schema_version`. Referenced local media must remain available to reproduce an edit.
 
-V3B2 downloads selected video files but does not integrate them into rendering, select music, style subtitles, publish videos, or generate images.
+V3C plans a future render but does not composite video, select music, style subtitles, publish videos, or generate images.

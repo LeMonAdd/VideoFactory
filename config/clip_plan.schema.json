@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "VideoFactory Clip Plan",
+  "type": "object", "additionalProperties": false,
+  "required": ["schema_version", "project_name", "source_margin_seconds", "clips"],
+  "properties": {
+    "schema_version": {"type": "integer", "const": 1},
+    "project_name": {"type": "string", "minLength": 1},
+    "source_margin_seconds": {"type": "number", "minimum": 0},
+    "clips": {
+      "type": "array", "minItems": 1,
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["shot_id", "visual_type", "resolved_visual_type", "status", "candidate_id", "relative_path", "timeline_start", "timeline_end", "timeline_duration", "source_in", "source_out", "source_duration", "asset_duration", "audio_policy", "source_overlap", "reason"],
+        "properties": {
+          "shot_id": {"type": "integer", "minimum": 1},
+          "visual_type": {"type": "string", "enum": ["A_ROLL", "B_ROLL", "IMAGE", "GRAPHIC"]},
+          "resolved_visual_type": {"type": "string", "enum": ["A_ROLL", "B_ROLL", "GRAPHIC"]},
+          "status": {"type": "string", "enum": ["PLANNED", "A_ROLL_FALLBACK", "GRAPHIC_FALLBACK", "SKIPPED"]},
+          "candidate_id": {"type": ["string", "null"]},
+          "relative_path": {"type": ["string", "null"]},
+          "timeline_start": {"type": "number", "minimum": 0},
+          "timeline_end": {"type": "number", "exclusiveMinimum": 0},
+          "timeline_duration": {"type": "number", "exclusiveMinimum": 0},
+          "source_in": {"type": ["number", "null"], "minimum": 0},
+          "source_out": {"type": ["number", "null"], "minimum": 0},
+          "source_duration": {"type": ["number", "null"], "minimum": 0},
+          "asset_duration": {"type": ["number", "null"], "minimum": 0},
+          "audio_policy": {"type": "string", "enum": ["MUTE_SOURCE", "KEEP_PRIMARY_CONTINUOUS"]},
+          "source_overlap": {"type": "boolean"},
+          "reason": {"type": "string", "minLength": 1}
+        }
+      }
+    }
+  }
+}

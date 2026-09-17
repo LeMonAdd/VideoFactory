@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import math
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -10,17 +11,21 @@ from pathlib import Path
 from . import SCHEMA_VERSION
 from .asset_manager import discover_assets
 from .audio import extract_narration
+from .clip_planner import build_clip_plan, validate_clip_plan
 from .director_provider import CodexDirector, RuleBasedDirector
 from .director_plan import validate_plan
 from .director_scenes import convert_plan_to_scenes
 from .director_service import create_director_plan
 from .input_handler import inspect_input
+from .edit_timeline import build_edit_timeline, validate_edit_timeline
+from .media_probe import duration as probe_duration
+from .media_probe import probe, stream
 from .models import read_json, write_json
 from .paths import ROOT, ProjectPaths, safe_project_name
 from .progress import ProgressReporter
 from .renderer import render
 from .source_downloader import (DEFAULT_MAX_DOWNLOAD_MB, SelectedMediaDownloader,
-                                max_download_bytes, selected_assets)
+                                max_download_bytes, selected_assets, validate_manifest)
 from .source_finder import find_sources
 from .source_provider import LocalSourceProvider, PexelsSourceProvider
 from .source_selection import build_selection_context, validate_selection
@@ -73,6 +78,10 @@ def parser() -> argparse.ArgumentParser:
                         help="Download only selected unique source videos for an existing project")
     result.add_argument("--max-download-mb", type=float, default=DEFAULT_MAX_DOWNLOAD_MB,
                         help="Hard per-asset download limit in MiB (default: 500)")
+    result.add_argument("--build-edit-timeline", action="store_true",
+                        help="Plan local B-roll source ranges and a layered edit timeline; no render")
+    result.add_argument("--source-margin-seconds", type=float, default=0.5,
+                        help="Preferred head/tail margin for source clips (default: 0.5)")
     result.add_argument("--fixture-transcript", type=Path,
                         help="Deterministic JSON transcript; bypasses MLX Whisper")
     result.add_argument("--whisper-model", "--mlx-model", dest="whisper_model",
@@ -224,6 +233,70 @@ def run_download_sources(args: argparse.Namespace) -> Path:
     return paths.project / "download_manifest.json"
 
 
+def run_build_edit_timeline(args: argparse.Namespace) -> tuple[Path, Path]:
+    name = safe_project_name(args.project)
+    paths = ProjectPaths(ROOT, name)
+    progress = ProgressReporter(6)
+    progress.start(1, "Loading project metadata")
+    project_path = paths.project / "project.json"
+    if not project_path.is_file():
+        raise FileNotFoundError(f"Existing project needs {project_path}")
+    project = read_json(project_path)
+    mode = project.get("mode")
+    if project.get("project_name") != name or mode not in {"TALKING_HEAD", "VOICEOVER"}:
+        raise ValueError("Existing project.json has a mismatched name or invalid mode")
+    primary = Path(project["source_media"])
+    info = probe(primary)
+    if stream(info, "audio") is None or (mode == "TALKING_HEAD" and stream(info, "video") is None):
+        raise ValueError("Primary source lacks required narration audio or talking-head video")
+    duration = round(probe_duration(info), 3)
+    progress.complete(1, "Project metadata loading")
+    progress.start(2, "Loading director plan")
+    plan_path = paths.project / "director_plan.json"
+    if not plan_path.is_file():
+        raise FileNotFoundError(f"Existing project needs {plan_path}")
+    plan = read_json(plan_path)
+    validate_plan(plan, name, duration, mode)
+    progress.complete(2, "Director plan loading")
+    progress.start(3, "Loading source selection")
+    selection_path = paths.project / "source_selection.json"
+    sources_path = paths.project / "sources.json"
+    for path in (selection_path, sources_path):
+        if not path.is_file():
+            raise FileNotFoundError(f"Existing project needs {path}")
+    selection = read_json(selection_path)
+    sources = read_json(sources_path)
+    validate_selection(selection, plan, sources)
+    progress.complete(3, "Source selection loading")
+    progress.start(4, "Loading downloaded media manifest")
+    manifest_path = paths.project / "download_manifest.json"
+    if not manifest_path.is_file():
+        raise FileNotFoundError(f"Existing project needs {manifest_path}")
+    manifest = read_json(manifest_path)
+    validate_manifest(manifest, name)
+    progress.complete(4, "Download manifest loading")
+    progress.start(5, "Planning source clips")
+    clip_plan = build_clip_plan(paths.project, mode, duration, plan, sources, selection,
+                                manifest, args.source_margin_seconds)
+    for clip in clip_plan["clips"]:
+        if clip["status"] == "PLANNED":
+            print(f"      shot {clip['shot_id']} -> B-roll {clip['candidate_id']} "
+                  f"[{clip['source_in']:.2f}-{clip['source_out']:.2f}]", flush=True)
+        elif clip["status"] in {"A_ROLL_FALLBACK", "GRAPHIC_FALLBACK"}:
+            print(f"      shot {clip['shot_id']} -> {clip['resolved_visual_type']} fallback", flush=True)
+    progress.complete(5, "Source clip planning")
+    progress.start(6, "Validating and saving edit timeline")
+    edit_timeline = build_edit_timeline(project, duration, plan, clip_plan, paths.project)
+    validate_clip_plan(clip_plan, plan, mode, duration, paths.project)
+    validate_edit_timeline(edit_timeline, project, plan, clip_plan, paths.project)
+    clip_path = paths.project / "clip_plan.json"
+    edit_path = paths.project / "edit_timeline.json"
+    write_json(clip_path, clip_plan)
+    write_json(edit_path, edit_timeline)
+    progress.complete(6, "Edit timeline validation and save")
+    return clip_path, edit_path
+
+
 def run(args: argparse.Namespace) -> dict:
     name = safe_project_name(args.project)
     mode = "TALKING_HEAD" if args.video else "VOICEOVER"
@@ -285,9 +358,10 @@ def run(args: argparse.Namespace) -> dict:
 def main(argv: list[str] | None = None) -> int:
     command_parser = parser()
     args = command_parser.parse_args(argv)
-    workflows = sum((args.plan_only, args.find_sources, args.select_sources, args.download_sources))
+    workflows = sum((args.plan_only, args.find_sources, args.select_sources,
+                     args.download_sources, args.build_edit_timeline))
     if workflows > 1:
-        command_parser.error("Choose only one of --plan-only, --find-sources, --select-sources, or --download-sources")
+        command_parser.error("Choose only one existing-project workflow")
     if args.find_sources:
         if args.video or args.voice or args.fixture_transcript:
             command_parser.error("--find-sources uses an existing project and cannot take source, fixture, or --plan-only arguments")
@@ -299,6 +373,9 @@ def main(argv: list[str] | None = None) -> int:
     elif args.download_sources:
         if args.video or args.voice or args.fixture_transcript:
             command_parser.error("--download-sources uses an existing project and cannot take source or fixture arguments")
+    elif args.build_edit_timeline:
+        if args.video or args.voice or args.fixture_transcript:
+            command_parser.error("--build-edit-timeline uses an existing project and cannot take source or fixture arguments")
     elif args.source_provider:
         command_parser.error("--source-provider requires --find-sources")
     elif args.plan_only:
@@ -316,7 +393,16 @@ def main(argv: list[str] | None = None) -> int:
         command_parser.error("--selector-model and --selector-timeout require --select-sources")
     if args.max_download_mb != DEFAULT_MAX_DOWNLOAD_MB and not args.download_sources:
         command_parser.error("--max-download-mb requires --download-sources")
+    if args.source_margin_seconds != 0.5 and not args.build_edit_timeline:
+        command_parser.error("--source-margin-seconds requires --build-edit-timeline")
+    if not math.isfinite(args.source_margin_seconds) or args.source_margin_seconds < 0:
+        command_parser.error("--source-margin-seconds must be finite and non-negative")
     try:
+        if args.build_edit_timeline:
+            clip_path, edit_path = run_build_edit_timeline(args)
+            print(f"Clip plan saved: {clip_path}")
+            print(f"Edit timeline saved: {edit_path}")
+            return 0
         max_download_bytes(args.max_download_mb)
     except ValueError as exc:
         command_parser.error(str(exc))

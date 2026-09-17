@@ -1,0 +1,71 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "VideoFactory Layered Edit Timeline",
+  "type": "object", "additionalProperties": false,
+  "required": ["schema_version", "project_name", "mode", "duration", "base_video", "base_audio", "uncovered_visual", "shot_resolutions", "visual_overlays"],
+  "properties": {
+    "schema_version": {"type": "integer", "const": 1},
+    "project_name": {"type": "string", "minLength": 1},
+    "mode": {"type": "string", "enum": ["TALKING_HEAD", "VOICEOVER"]},
+    "duration": {"type": "number", "exclusiveMinimum": 0},
+    "base_video": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "required": ["source", "source_path", "timeline_start", "timeline_end", "source_in", "source_out"],
+      "properties": {
+        "source": {"type": "string", "const": "PRIMARY"},
+        "source_path": {"type": "string", "minLength": 1},
+        "timeline_start": {"type": "number", "const": 0},
+        "timeline_end": {"type": "number", "exclusiveMinimum": 0},
+        "source_in": {"type": "number", "const": 0},
+        "source_out": {"type": "number", "exclusiveMinimum": 0}
+      }
+    },
+    "base_audio": {
+      "type": "object", "additionalProperties": false,
+      "required": ["source", "source_path", "timeline_start", "timeline_end", "source_in", "source_out", "audio_policy"],
+      "properties": {
+        "source": {"type": "string", "const": "PRIMARY"},
+        "source_path": {"type": "string", "minLength": 1},
+        "timeline_start": {"type": "number", "const": 0},
+        "timeline_end": {"type": "number", "exclusiveMinimum": 0},
+        "source_in": {"type": "number", "const": 0},
+        "source_out": {"type": "number", "exclusiveMinimum": 0},
+        "audio_policy": {"type": "string", "const": "KEEP_PRIMARY_CONTINUOUS"}
+      }
+    },
+    "uncovered_visual": {"type": "string", "enum": ["PRIMARY", "GRAPHIC_PLACEHOLDER"]},
+    "shot_resolutions": {
+      "type": "array", "minItems": 1,
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["shot_id", "timeline_start", "timeline_end", "visual_type", "status"],
+        "properties": {
+          "shot_id": {"type": "integer", "minimum": 1},
+          "timeline_start": {"type": "number", "minimum": 0},
+          "timeline_end": {"type": "number", "exclusiveMinimum": 0},
+          "visual_type": {"type": "string", "enum": ["A_ROLL", "B_ROLL", "GRAPHIC"]},
+          "status": {"type": "string", "enum": ["PLANNED", "A_ROLL_FALLBACK", "GRAPHIC_FALLBACK", "SKIPPED"]}
+        }
+      }
+    },
+    "visual_overlays": {
+      "type": "array",
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["shot_id", "visual_type", "timeline_start", "timeline_end", "source_path", "source_in", "source_out", "source_audio", "audio_policy"],
+        "properties": {
+          "shot_id": {"type": "integer", "minimum": 1},
+          "visual_type": {"type": "string", "enum": ["B_ROLL", "GRAPHIC"]},
+          "timeline_start": {"type": "number", "minimum": 0},
+          "timeline_end": {"type": "number", "exclusiveMinimum": 0},
+          "source_path": {"type": ["string", "null"]},
+          "source_in": {"type": ["number", "null"], "minimum": 0},
+          "source_out": {"type": ["number", "null"], "minimum": 0},
+          "source_audio": {"type": "boolean", "const": false},
+          "audio_policy": {"type": "string", "const": "MUTE_SOURCE"}
+        }
+      }
+    }
+  }
+}

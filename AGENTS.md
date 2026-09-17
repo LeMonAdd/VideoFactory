@@ -2,7 +2,7 @@
 
 ## Purpose and Scope
 
-VideoFactory is a local automated video-editing pipeline for macOS Apple Silicon. Python 3.12 orchestrates the workflow; FFmpeg and ffprobe process and inspect media; MLX Whisper transcribes locally. V2A adds a transcript-only AI Director. V3A adds opt-in external candidate search; V3B1 selects or rejects saved candidates; V3B2 downloads selected assets. Rendering does not yet use external assets.
+VideoFactory is a local automated video-editing pipeline for macOS Apple Silicon. Python 3.12 orchestrates the workflow; FFmpeg and ffprobe process and inspect media; MLX Whisper transcribes locally. V2A adds a transcript-only AI Director. V3A adds opt-in external candidate search; V3B1 selects or rejects saved candidates; V3B2 downloads selected assets; V3C plans source ranges and a layered edit timeline. Rendering does not yet use external assets.
 
 Do not add YouTube downloading, automatic internet B-roll search during normal editing, web scraping, a GUI, automatic music selection, automatic subtitle styling, external transcription or Director APIs, or cloud rendering unless explicitly requested. Do not require an OpenAI API key.
 
@@ -36,7 +36,11 @@ In both modes, persist editing decisions in structured JSON rather than agent me
 
 ## Selected Media Download V3B2
 
-`--download-sources` is the explicit network download command. It reads saved selections, downloads each unique selected Pexels video once under `projects/<name>/media/broll/`, and records shot mapping, provenance, SHA-256, and ffprobe results in `download_manifest.json`. Require HTTPS, a verified certifi CA context, a size limit, `.part` staging, and validation before atomic promotion. Never send the Pexels API key to media hosts or overwrite an unrelated file. Reuse only files whose hashes match the existing manifest. Tests must mock HTTP and ffprobe; do not perform real downloads during implementation. External timeline integration and rendering belong to V3C.
+`--download-sources` is the explicit network download command. It reads saved selections, downloads each unique selected Pexels video once under `projects/<name>/media/broll/`, and records shot mapping, provenance, SHA-256, and ffprobe results in `download_manifest.json`. Require HTTPS, a verified certifi CA context, a size limit, `.part` staging, and validation before atomic promotion. Never send the Pexels API key to media hosts or overwrite an unrelated file. Reuse only files whose hashes match the existing manifest. Tests must mock HTTP and ffprobe; do not perform real downloads during implementation.
+
+## Clip Planning V3C
+
+`--build-edit-timeline` is read-only with respect to source media and creates only `clip_plan.json` and `edit_timeline.json`. Validate selected IDs, manifest entries, hashes, and local media paths before planning. Allocate deterministic, technically valid B-roll source windows with a preferred safety margin; prefer distinct ranges for repeated uses and record unavoidable overlap. Fall back to A-roll for unsupported TALKING_HEAD visuals and a graphic placeholder for VOICEOVER. Keep the primary narration continuous across the whole project, mute source audio, and represent the primary visual layer across uncovered gaps. V3C does not inspect video content for ideal moments or render; final compositing belongs to V3D. Tests must remain offline.
 
 ## Project Data and Directories
 
