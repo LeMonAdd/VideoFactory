@@ -2,7 +2,7 @@
 
 ## Purpose and Scope
 
-VideoFactory is a local automated video-editing pipeline for macOS Apple Silicon. Python 3.12 orchestrates the workflow; FFmpeg and ffprobe process and inspect media; MLX Whisper transcribes locally. V2A adds a transcript-only AI Director. V3A adds opt-in external candidate search; all rendered visual media remains local.
+VideoFactory is a local automated video-editing pipeline for macOS Apple Silicon. Python 3.12 orchestrates the workflow; FFmpeg and ffprobe process and inspect media; MLX Whisper transcribes locally. V2A adds a transcript-only AI Director. V3A adds opt-in external candidate search; V3B1 selects or rejects saved candidates. All rendered visual media remains local.
 
 Do not add YouTube downloading, automatic internet B-roll search during normal editing, web scraping, a GUI, automatic music selection, automatic subtitle styling, external transcription or Director APIs, or cloud rendering unless explicitly requested. Do not require an OpenAI API key.
 
@@ -28,7 +28,11 @@ In both modes, persist editing decisions in structured JSON rather than agent me
 
 ## Source Finder V3A
 
-`--find-sources --source-provider pexels` is the sole opt-in Pexels candidate search path. Read `PEXELS_API_KEY` from the environment; never persist or log it. Search B-roll video queries, deduplicate identical normalized queries within a run, preserve candidate provenance, and save unselected results in `sources.json`. A-roll and graphics require no search. Pexels image search, candidate selection, download, and external media rendering are outside V3A. `--source-provider local` uses only explicit local asset query tags. Tests must mock HTTP and make no real external requests.
+`--find-sources --source-provider pexels` is the sole opt-in Pexels candidate search path. Read `PEXELS_API_KEY` from the environment; never persist or log it. Search B-roll video queries, deduplicate identical normalized queries within a run, preserve candidate provenance, and save unselected results in `sources.json`. A-roll and graphics require no search. Pexels image search, download, and external media rendering are outside V3A. `--source-provider local` uses only explicit local asset query tags. Tests must mock HTTP and make no real external requests.
+
+## Source Selection V3B1
+
+`--select-sources` reads the existing director plan and source requests, then writes only `source_selection.json`. The default `--selector rule` is deterministic and conservative; `--selector codex` requires explicit opt-in and one sandboxed, read-only Codex call with compact metadata. Reject candidates when semantic evidence or source duration is insufficient. Treat Pexels URL slugs as clues, not verified content; never infer nationality from creator names. Validate selected IDs against the candidates for the same shot, and add runtime metadata in VideoFactory. Do not search, download, alter the timeline, or render in selection mode. Tests must mock Codex. Downloads and external rendering belong to later versions.
 
 ## Project Data and Directories
 

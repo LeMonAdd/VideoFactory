@@ -21,6 +21,10 @@ from .progress import ProgressReporter
 from .renderer import render
 from .source_finder import find_sources
 from .source_provider import LocalSourceProvider, PexelsSourceProvider
+from .source_selection import build_selection_context, validate_selection
+from .source_selection_service import create_source_selection
+from .source_selector import CodexSourceSelector, RuleBasedSourceSelector
+from .source_models import validate_sources_document
 from .timeline import build_timeline
 from .transcriber import FixtureTranscriber, RealMLXTranscriber
 from .validator import validate_output
@@ -56,6 +60,13 @@ def parser() -> argparse.ArgumentParser:
                         help="Candidate provider for --find-sources; Pexels is opt-in")
     result.add_argument("--source-limit", type=int, default=5,
                         help="Maximum candidates per visual query (1-20; default: 5)")
+    result.add_argument("--select-sources", action="store_true",
+                        help="Select or reject existing candidates without search, download, or render")
+    result.add_argument("--selector", choices=["rule", "codex"], default="rule",
+                        help="Candidate selector (default: rule; Codex is opt-in)")
+    result.add_argument("--selector-model", help="Optional Codex selector model")
+    result.add_argument("--selector-timeout", type=float, default=300,
+                        help="Codex selector subprocess timeout in seconds (default: 300)")
     result.add_argument("--fixture-transcript", type=Path,
                         help="Deterministic JSON transcript; bypasses MLX Whisper")
     result.add_argument("--whisper-model", "--mlx-model", dest="whisper_model",
@@ -136,6 +147,42 @@ def run_find_sources(args: argparse.Namespace) -> Path:
     return destination
 
 
+def run_select_sources(args: argparse.Namespace) -> Path:
+    name = safe_project_name(args.project)
+    paths = ProjectPaths(ROOT, name)
+    progress = ProgressReporter(4)
+    progress.start(1, "Loading director plan")
+    for filename in ("project.json", "transcript.json", "director_plan.json"):
+        if not (paths.project / filename).is_file():
+            raise FileNotFoundError(f"Existing project needs {paths.project / filename}")
+    project = read_json(paths.project / "project.json")
+    transcript = read_json(paths.project / "transcript.json")
+    plan = read_json(paths.project / "director_plan.json")
+    if project.get("project_name") != name or project.get("mode") not in {"TALKING_HEAD", "VOICEOVER"}:
+        raise ValueError("Existing project.json has a mismatched name or invalid mode")
+    validate_plan(plan, name, float(transcript["duration"]), project["mode"])
+    progress.complete(1, "Director plan loading")
+    progress.start(2, "Loading source candidates")
+    source_path = paths.project / "sources.json"
+    if not source_path.is_file():
+        raise FileNotFoundError(f"Existing project needs {source_path}")
+    sources = read_json(source_path)
+    validate_sources_document(sources, name)
+    build_selection_context(plan, sources, transcript)
+    progress.complete(2, "Source candidate loading")
+    progress.start(3, "Selecting candidates")
+    selector = (CodexSourceSelector(model=args.selector_model, timeout_seconds=args.selector_timeout)
+                if args.selector == "codex" else RuleBasedSourceSelector())
+    selection = create_source_selection(plan, sources, selector, transcript)
+    progress.complete(3, "Candidate selection")
+    progress.start(4, "Validating and saving source_selection.json")
+    validate_selection(selection, plan, sources)
+    destination = paths.project / "source_selection.json"
+    write_json(destination, selection)
+    progress.complete(4, "Source selection validation and save")
+    return destination
+
+
 def run(args: argparse.Namespace) -> dict:
     name = safe_project_name(args.project)
     mode = "TALKING_HEAD" if args.video else "VOICEOVER"
@@ -198,20 +245,32 @@ def main(argv: list[str] | None = None) -> int:
     command_parser = parser()
     args = command_parser.parse_args(argv)
     if args.find_sources:
-        if args.plan_only or args.video or args.voice or args.fixture_transcript:
+        if args.plan_only or args.select_sources or args.video or args.voice or args.fixture_transcript:
             command_parser.error("--find-sources uses an existing project and cannot take source, fixture, or --plan-only arguments")
         if not args.source_provider:
             command_parser.error("--find-sources requires --source-provider local or pexels")
+    elif args.select_sources:
+        if args.plan_only or args.video or args.voice or args.fixture_transcript:
+            command_parser.error("--select-sources uses an existing project and cannot take source, fixture, or --plan-only arguments")
     elif args.source_provider:
         command_parser.error("--source-provider requires --find-sources")
     elif args.plan_only:
         if args.video or args.voice or args.fixture_transcript:
             command_parser.error("--plan-only uses an existing project and cannot take source or fixture arguments")
     elif not (args.video or args.voice):
-        command_parser.error("one of --video or --voice is required unless --plan-only or --find-sources is used")
+        command_parser.error("one of --video or --voice is required unless --plan-only, --find-sources, or --select-sources is used")
     if not 1 <= args.source_limit <= 20:
         command_parser.error("--source-limit must be between 1 and 20")
+    if args.source_provider and not args.find_sources:
+        command_parser.error("--source-provider requires --find-sources")
+    if args.selector == "codex" and not args.select_sources:
+        command_parser.error("--selector codex requires --select-sources")
+    if (args.selector_model or args.selector_timeout != 300) and not args.select_sources:
+        command_parser.error("--selector-model and --selector-timeout require --select-sources")
     try:
+        if args.select_sources:
+            print(f"Source selection saved: {run_select_sources(args)}")
+            return 0
         if args.find_sources:
             print(f"Source candidates saved: {run_find_sources(args)}")
             return 0

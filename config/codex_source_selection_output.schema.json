@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "VideoFactory Codex Source Selection Output",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "project_name", "selections"],
+  "properties": {
+    "schema_version": {"type": "integer", "enum": [1]},
+    "project_name": {"type": "string"},
+    "selections": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["shot_id", "status", "candidate_id", "reason", "confidence", "refined_query"],
+        "properties": {
+          "shot_id": {"type": "integer"},
+          "status": {"type": "string", "enum": ["SELECTED", "NO_SUITABLE_CANDIDATE", "SKIPPED"]},
+          "candidate_id": {"type": ["string", "null"]},
+          "reason": {"type": "string"},
+          "confidence": {"type": ["number", "null"]},
+          "refined_query": {"type": ["string", "null"]}
+        }
+      }
+    }
+  }
+}

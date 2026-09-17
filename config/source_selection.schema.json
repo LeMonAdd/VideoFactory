@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "VideoFactory Source Selection",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "project_name", "provider", "selections", "metadata"],
+  "properties": {
+    "schema_version": {"type": "integer", "const": 1},
+    "project_name": {"type": "string", "minLength": 1},
+    "provider": {"type": "string", "enum": ["rule", "codex"]},
+    "selections": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["shot_id", "status", "candidate_id", "reason", "confidence", "refined_query"],
+        "properties": {
+          "shot_id": {"type": "integer", "minimum": 1},
+          "status": {"type": "string", "enum": ["SELECTED", "NO_SUITABLE_CANDIDATE", "SKIPPED"]},
+          "candidate_id": {"type": ["string", "null"]},
+          "reason": {"type": "string", "minLength": 1},
+          "confidence": {"type": ["number", "null"], "minimum": 0, "maximum": 1},
+          "refined_query": {"type": ["string", "null"]}
+        }
+      }
+    },
+    "metadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["provider", "model", "invocation_count", "elapsed_seconds"],
+      "properties": {
+        "provider": {"type": "string", "enum": ["rule", "codex"]},
+        "model": {"type": ["string", "null"]},
+        "invocation_count": {"type": "integer", "minimum": 0},
+        "elapsed_seconds": {"type": "number", "minimum": 0}
+      }
+    }
+  }
+}
