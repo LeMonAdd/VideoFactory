@@ -1,7 +1,24 @@
 .venv/
 __pycache__/
+*.pyc
+.pytest_cache/
 .DS_Store
 .env
 temp/
 output/
 inbox/
+*.mp4
+*.mov
+*.m4v
+*.mkv
+*.webm
+*.wav
+*.m4a
+*.mp3
+*.flac
+
+# Generated synthetic integration projects
+projects/synthetic_*/
+
+# Generated synthetic integration projects
+projects/synthetic_*/

@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "language": "en",
+  "duration": 20.0,
+  "segments": [
+    {"start": 0.0, "end": 4.0, "text": "Opening narration on camera."},
+    {"start": 4.0, "end": 8.0, "text": "First supporting visual while narration continues."},
+    {"start": 8.0, "end": 12.0, "text": "Back to the presenter."},
+    {"start": 12.0, "end": 16.0, "text": "Second supporting visual under the same narration."},
+    {"start": 16.0, "end": 20.0, "text": "Closing narration on camera."}
+  ]
+}
