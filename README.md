@@ -1,6 +1,6 @@
 # VideoFactory
 
-VideoFactory is a local automated video-editing pipeline for macOS Apple Silicon. It turns narration and local visuals into a 1920×1080, 30 fps H.264/AAC draft. Python 3.12, FFmpeg/ffprobe, and local MLX Whisper handle media and transcription. V2A adds an editorial DirectorPlan; V3A discovers external candidates; V3B1 selects or rejects them; V3B2 downloads selected assets; V3C plans source ranges; V3D renders the layered edit. Fixture transcripts keep automated tests independent of Metal.
+VideoFactory is a local automated video-editing pipeline for macOS Apple Silicon. It turns narration and local visuals into a 1920×1080, 30 fps H.264/AAC draft. Python 3.12, FFmpeg/ffprobe, and local MLX Whisper handle media and transcription. V2A adds an editorial DirectorPlan; V3A discovers external candidates; V3B1 selects or rejects them; V3B2 downloads selected assets; V3C plans source ranges; V3D renders the layered edit; V4A plans conservative speech-gap cuts and a canonical time map without rendering. Fixture transcripts keep automated tests independent of Metal.
 
 ## Architecture
 
@@ -137,6 +137,27 @@ Render the saved TALKING_HEAD edit with:
 V3D uses the primary video as the full-duration base, overlays the saved B-roll windows, and maps only the original narration audio. B-roll audio is muted. Repeated use of one B-roll file opens it once and splits it into independent source-range branches. The render uses 1920×1080 center-fill normalization, 30 fps, H.264/AAC, and strips source metadata. It writes `output/<name>/edited_draft.mp4` after validating a temporary MP4, plus `projects/<name>/render_manifest.json` with codec, stream, duration, size, and SHA-256 facts. The V1 `output/<name>/draft.mp4` remains separate. An existing edited draft requires `--overwrite-render`; `--encoder h264_videotoolbox` remains available.
 
 V3D adds no transitions, music, subtitles, graphics, or editorial changes. It rejects unresolved GRAPHIC overlays. VOICEOVER V3C timelines currently have no renderable base visual, so V3D reports that mode as unsupported; V1 voiceover rendering remains available.
+
+### V4A conservative speech-gap planning
+
+Plan cuts and a canonical time map from an existing project without modifying media:
+
+```sh
+./.venv/bin/python factory.py --project real_test_large_001 --plan-speech-edits
+```
+
+V4A reads `project.json`, `transcript.json`, and `edit_timeline.json`. Local FFmpeg `silencedetect` analyzes only the primary audio stream for acoustic pauses; it writes no media. By default, V4A shortens detected internal silences of at least 1.0 second, retains 0.25 second of natural pause, and uses a −35 dB detection threshold. `--pause-threshold-seconds N`, `--pause-keep-seconds N`, and `--silence-noise-db N` adjust these values. At least 0.04 second remains at each detected silence edge, even when keep is set to zero. Multiple opening silence regions and ending ambience are preserved.
+
+Whisper word timestamps are validated for transcript integrity and used to identify the first and last speech boundaries. They are not treated as sample-accurate silence boundaries: a validated acoustic silence can remain eligible even if a stretched word timestamp overlaps it. Malformed, overlapping, missing, or non-finite word timing causes an error.
+
+The command writes `projects/<name>/speech_edit_plan.json` with cuts, detected-silence bounds, detection settings, complementary keep segments, duration totals, and B-roll shot IDs intersected by each cut. It also writes `retime_map.json`, whose segments map kept source time to edited time. The reusable `map_source_time` helper raises for timestamps inside a removed region unless the caller explicitly chooses a boundary bias. V4A does not alter B-roll choices or source ranges, apply punch-ins, change audio or video, or render. Future V4B can apply the same cuts to all layers.
+
+Inspect the plan and map before any timing changes to media:
+
+```sh
+./.venv/bin/python -m json.tool projects/real_test_large_001/speech_edit_plan.json
+./.venv/bin/python -m json.tool projects/real_test_large_001/retime_map.json
+```
 
 ## Tests and synthetic integration
 

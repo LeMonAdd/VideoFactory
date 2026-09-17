@@ -33,6 +33,8 @@ from .source_selection import build_selection_context, validate_selection
 from .source_selection_service import create_source_selection
 from .source_selector import CodexSourceSelector, RuleBasedSourceSelector
 from .source_models import validate_sources_document
+from .speech_edit import SpeechEditPlanner, build_retime_map, validate_inputs, validate_parameters
+from .silence_detector import LocalAudioSilenceDetector, validate_noise_db
 from .timeline import build_timeline
 from .transcriber import FixtureTranscriber, RealMLXTranscriber
 from .validator import validate_output
@@ -83,6 +85,14 @@ def parser() -> argparse.ArgumentParser:
                         help="Plan local B-roll source ranges and a layered edit timeline; no render")
     result.add_argument("--render-edit", action="store_true",
                         help="Render the saved layered edit timeline to edited_draft.mp4")
+    result.add_argument("--plan-speech-edits", action="store_true",
+                        help="Plan conservative speech-gap cuts and a canonical time map without rendering")
+    result.add_argument("--pause-threshold-seconds", type=float, default=1.0,
+                        help="Minimum detected audio silence to consider for shortening (default: 1.0)")
+    result.add_argument("--pause-keep-seconds", type=float, default=0.25,
+                        help="Natural pause to retain around a cut (default: 0.25)")
+    result.add_argument("--silence-noise-db", type=float, default=-35.0,
+                        help="FFmpeg silencedetect threshold in dB (default: -35)")
     result.add_argument("--source-margin-seconds", type=float, default=0.5,
                         help="Preferred head/tail margin for source clips (default: 0.5)")
     result.add_argument("--fixture-transcript", type=Path,
@@ -339,6 +349,48 @@ def run_render_edit(args: argparse.Namespace) -> Path:
     return paths.output / "edited_draft.mp4"
 
 
+def run_plan_speech_edits(args: argparse.Namespace) -> tuple[Path, Path]:
+    name = safe_project_name(args.project)
+    paths = ProjectPaths(ROOT, name)
+    progress = ProgressReporter(5)
+    progress.start(1, "Loading transcript")
+    required = ("project.json", "transcript.json", "edit_timeline.json")
+    for filename in required:
+        if not (paths.project / filename).is_file():
+            raise FileNotFoundError(f"Existing project needs {paths.project / filename}")
+    project = read_json(paths.project / "project.json")
+    transcript = read_json(paths.project / "transcript.json")
+    timeline = read_json(paths.project / "edit_timeline.json")
+    progress.complete(1, "Transcript loading")
+    progress.start(2, "Validating word timestamps")
+    validate_inputs(project, transcript, timeline)
+    progress.complete(2, "Word timestamp validation")
+    progress.start(3, "Detecting removable pauses")
+    silences = LocalAudioSilenceDetector().detect(
+        Path(project["source_media"]), timeline["duration"],
+        args.pause_threshold_seconds, args.silence_noise_db)
+    plan = SpeechEditPlanner().plan(project, transcript, timeline, silences,
+                                    args.pause_threshold_seconds, args.pause_keep_seconds,
+                                    args.silence_noise_db)
+    progress.complete(3, "Pause detection")
+    progress.start(4, "Building deterministic time map")
+    retime = build_retime_map(plan)
+    progress.complete(4, "Time map construction")
+    progress.start(5, "Validating and saving speech edit plan")
+    plan_path = paths.project / "speech_edit_plan.json"
+    map_path = paths.project / "retime_map.json"
+    write_json(plan_path, plan)
+    write_json(map_path, retime)
+    progress.complete(5, "Speech edit plan validation and save")
+    for cut in plan["cuts"]:
+        print(f"pause {cut['id']}: {cut['source_start']:.2f}-{cut['source_end']:.2f} "
+              f"removed {cut['removed_duration']:.2f}s", flush=True)
+    print(f"Original duration: {plan['source_duration']:.2f}s\n"
+          f"Removed: {plan['total_removed_duration']:.2f}s\n"
+          f"Edited duration: {plan['edited_duration']:.2f}s", flush=True)
+    return plan_path, map_path
+
+
 def run(args: argparse.Namespace) -> dict:
     name = safe_project_name(args.project)
     mode = "TALKING_HEAD" if args.video else "VOICEOVER"
@@ -401,7 +453,8 @@ def main(argv: list[str] | None = None) -> int:
     command_parser = parser()
     args = command_parser.parse_args(argv)
     workflows = sum((args.plan_only, args.find_sources, args.select_sources,
-                     args.download_sources, args.build_edit_timeline, args.render_edit))
+                     args.download_sources, args.build_edit_timeline, args.render_edit,
+                     args.plan_speech_edits))
     if workflows > 1:
         command_parser.error("Choose only one existing-project workflow")
     if args.find_sources:
@@ -421,6 +474,9 @@ def main(argv: list[str] | None = None) -> int:
     elif args.render_edit:
         if args.video or args.voice or args.fixture_transcript:
             command_parser.error("--render-edit uses an existing project and cannot take source or fixture arguments")
+    elif args.plan_speech_edits:
+        if args.video or args.voice or args.fixture_transcript:
+            command_parser.error("--plan-speech-edits uses an existing project and cannot take source or fixture arguments")
     elif args.source_provider:
         command_parser.error("--source-provider requires --find-sources")
     elif args.plan_only:
@@ -442,6 +498,15 @@ def main(argv: list[str] | None = None) -> int:
         command_parser.error("--source-margin-seconds requires --build-edit-timeline")
     if not math.isfinite(args.source_margin_seconds) or args.source_margin_seconds < 0:
         command_parser.error("--source-margin-seconds must be finite and non-negative")
+    if ((args.pause_threshold_seconds != 1.0 or args.pause_keep_seconds != 0.25 or
+         args.silence_noise_db != -35.0)
+            and not args.plan_speech_edits):
+        command_parser.error("Silence and pause options require --plan-speech-edits")
+    try:
+        validate_parameters(args.pause_threshold_seconds, args.pause_keep_seconds)
+        validate_noise_db(args.silence_noise_db)
+    except ValueError as exc:
+        command_parser.error(str(exc))
     try:
         if args.build_edit_timeline:
             clip_path, edit_path = run_build_edit_timeline(args)
@@ -452,6 +517,10 @@ def main(argv: list[str] | None = None) -> int:
     except ValueError as exc:
         command_parser.error(str(exc))
     try:
+        if args.plan_speech_edits:
+            plan_path, map_path = run_plan_speech_edits(args)
+            print(f"Speech edit plan saved: {plan_path}\nRetime map saved: {map_path}")
+            return 0
         if args.render_edit:
             print(f"Edited draft rendered and validated: {run_render_edit(args)}")
             return 0
