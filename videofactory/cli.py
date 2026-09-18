@@ -25,10 +25,6 @@ from .jump_cut_style import (build_jump_cut_style_plan, build_styled_edit_timeli
                              validate_punch_in_scale)
 from .punch_in_renderer import PunchInRenderer
 from .caption_export import CaptionExporter
-from .emphasis import (automatic_max_count, build_emphasis_candidates,
-                       build_emphasis_plan, validate_emphasis_candidates,
-                       validate_selection_options)
-from .emphasis_selector import CodexEmphasisSelector, RuleBasedEmphasisSelector
 from .media_probe import duration as probe_duration
 from .media_probe import probe, stream
 from .models import read_json, write_json
@@ -106,17 +102,6 @@ def parser() -> argparse.ArgumentParser:
                         help="Render static alternating primary framing to punch_in_draft.mp4")
     result.add_argument("--export-captions", action="store_true",
                         help="Export retimed SRT and WebVTT sidecar captions without rendering")
-    result.add_argument("--plan-emphasis", action="store_true",
-                        help="Plan sparse transcript-anchored visual emphasis without rendering")
-    result.add_argument("--emphasis-selector", choices=["rule", "codex"], default="rule",
-                        help="Emphasis selector (default: deterministic rule)")
-    result.add_argument("--emphasis-model", help="Optional Codex emphasis model")
-    result.add_argument("--emphasis-timeout", type=float, default=300,
-                        help="Codex emphasis timeout in seconds (default: 300)")
-    result.add_argument("--emphasis-max-count", type=int, default=0,
-                        help="Maximum emphasis items; 0 uses automatic sparse count")
-    result.add_argument("--emphasis-min-gap-seconds", type=float, default=5.0,
-                        help="Minimum clean gap between emphasis windows (default: 5.0)")
     result.add_argument("--overwrite-captions", action="store_true",
                         help="Replace existing generated caption sidecars")
     result.add_argument("--punch-in-scale", type=float, default=1.08,
@@ -579,59 +564,6 @@ def run_export_captions(args: argparse.Namespace) -> dict:
     return manifest
 
 
-def run_plan_emphasis(args: argparse.Namespace) -> tuple[Path, Path, dict]:
-    name = safe_project_name(args.project)
-    paths = ProjectPaths(ROOT, name)
-    progress = ProgressReporter(5)
-    progress.start(1, "Loading emphasis artifacts")
-    required = ("transcript.json", "retime_map.json", "caption_timeline.json",
-                "retimed_edit_timeline.json")
-    input_paths = {filename: paths.project / filename for filename in required}
-    for filename, path in input_paths.items():
-        if not path.is_file():
-            raise FileNotFoundError(f"Existing project needs {path}")
-    input_hashes = {filename: sha256_file(path) for filename, path in input_paths.items()}
-    documents = {filename: read_json(path) for filename, path in input_paths.items()}
-    if any(sha256_file(path) != input_hashes[filename] for filename, path in input_paths.items()):
-        raise ValueError("Emphasis input artifacts changed while loading")
-    progress.complete(1, "Emphasis artifact loading")
-    progress.start(2, "Validating frozen edit timeline")
-    from .caption_timeline import validate_caption_inputs
-    validate_caption_inputs(name, documents["transcript.json"], documents["retime_map.json"],
-                            documents["retimed_edit_timeline.json"])
-    progress.complete(2, "Frozen edit timeline validation")
-    progress.start(3, "Building emphasis candidates")
-    candidates = build_emphasis_candidates(name, documents["transcript.json"],
-                                           documents["retime_map.json"],
-                                           documents["caption_timeline.json"],
-                                           documents["retimed_edit_timeline.json"])
-    candidate_path = paths.project / "emphasis_candidates.json"
-    write_json(candidate_path, candidates)
-    validate_emphasis_candidates(read_json(candidate_path), name, documents["transcript.json"],
-                                 documents["retime_map.json"], documents["caption_timeline.json"],
-                                 documents["retimed_edit_timeline.json"])
-    input_hashes["emphasis_candidates.json"] = sha256_file(candidate_path)
-    progress.complete(3, "Emphasis candidate construction")
-    progress.start(4, "Selecting smart emphasis")
-    maximum = args.emphasis_max_count or automatic_max_count(candidates["duration"])
-    selector = (CodexEmphasisSelector(args.emphasis_model, args.emphasis_timeout)
-                if args.emphasis_selector == "codex" else RuleBasedEmphasisSelector())
-    ids = selector.select(candidates, maximum, args.emphasis_min_gap_seconds)
-    plan = build_emphasis_plan(name, candidates, ids, args.emphasis_selector,
-                               args.emphasis_max_count, args.emphasis_min_gap_seconds,
-                               input_hashes)
-    progress.complete(4, "Smart emphasis selection")
-    progress.start(5, "Validating and saving emphasis plan")
-    if any(sha256_file(path) != input_hashes[filename] for filename, path in input_paths.items()):
-        raise ValueError("Emphasis input artifacts changed during planning")
-    if sha256_file(candidate_path) != input_hashes["emphasis_candidates.json"]:
-        raise ValueError("Emphasis candidates changed during planning")
-    plan_path = paths.project / "emphasis_plan.json"
-    write_json(plan_path, plan)
-    progress.complete(5, "Emphasis plan validation and save")
-    return candidate_path, plan_path, plan
-
-
 def run(args: argparse.Namespace) -> dict:
     name = safe_project_name(args.project)
     mode = "TALKING_HEAD" if args.video else "VOICEOVER"
@@ -697,7 +629,7 @@ def main(argv: list[str] | None = None) -> int:
     workflows = sum((args.plan_only, args.find_sources, args.select_sources,
                      args.download_sources, args.build_edit_timeline, args.render_edit,
                      args.plan_speech_edits, args.render_speech_edits, args.render_punch_ins,
-                     args.export_captions, args.plan_emphasis))
+                     args.export_captions))
     if workflows > 1:
         command_parser.error("Choose only one existing-project workflow")
     if args.find_sources:
@@ -729,9 +661,6 @@ def main(argv: list[str] | None = None) -> int:
     elif args.export_captions:
         if args.video or args.voice or args.fixture_transcript:
             command_parser.error("--export-captions uses an existing project and cannot take source or fixture arguments")
-    elif args.plan_emphasis:
-        if args.video or args.voice or args.fixture_transcript:
-            command_parser.error("--plan-emphasis uses an existing project and cannot take source or fixture arguments")
     elif args.source_provider:
         command_parser.error("--source-provider requires --find-sources")
     elif args.plan_only:
@@ -762,19 +691,10 @@ def main(argv: list[str] | None = None) -> int:
         command_parser.error("--punch-in-scale requires --render-punch-ins")
     if args.overwrite_captions and not args.export_captions:
         command_parser.error("--overwrite-captions requires --export-captions")
-    emphasis_flags = ("--emphasis-selector", "--emphasis-model", "--emphasis-timeout",
-                      "--emphasis-max-count", "--emphasis-min-gap-seconds")
-    if not args.plan_emphasis and any(item == flag or item.startswith(flag + "=")
-                                      for item in supplied_args for flag in emphasis_flags):
-        command_parser.error("Emphasis options require --plan-emphasis")
-    if args.emphasis_model and args.emphasis_selector != "codex":
-        command_parser.error("--emphasis-model requires --emphasis-selector codex")
     try:
         validate_parameters(args.pause_threshold_seconds, args.pause_keep_seconds)
         validate_noise_db(args.silence_noise_db)
         validate_punch_in_scale(args.punch_in_scale)
-        validate_selection_options(args.emphasis_max_count, args.emphasis_min_gap_seconds,
-                                   args.emphasis_timeout)
     except ValueError as exc:
         command_parser.error(str(exc))
     try:
@@ -787,15 +707,6 @@ def main(argv: list[str] | None = None) -> int:
     except ValueError as exc:
         command_parser.error(str(exc))
     try:
-        if args.plan_emphasis:
-            candidate_path, plan_path, plan = run_plan_emphasis(args)
-            print(f"Candidates: {len(read_json(candidate_path)['candidates'])}\n"
-                  f"Selected emphasis: {len(plan['items'])}\nProvider: {plan['provider']}\n"
-                  f"Duration: {plan['duration']:.3f}s\nPlan: {plan_path}")
-            for item in plan["items"]:
-                print(f"{item['index']}: {item['timeline_start']:.3f}-{item['timeline_end']:.3f} | "
-                      f"{item['text']}")
-            return 0
         if args.export_captions:
             manifest = run_export_captions(args)
             print(f"Caption cues: {manifest['cue_count']}\nLanguage: {manifest['language']}\n"

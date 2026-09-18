@@ -150,7 +150,7 @@ V4A reads `project.json`, `transcript.json`, and `edit_timeline.json`. Local FFm
 
 Whisper word timestamps are validated for transcript integrity and used to identify the first and last speech boundaries. They are not treated as sample-accurate silence boundaries: a validated acoustic silence can remain eligible even if a stretched word timestamp overlaps it. Malformed, overlapping, missing, or non-finite word timing causes an error.
 
-The command writes `projects/<name>/speech_edit_plan.json` with cuts, detected-silence bounds, detection settings, complementary keep segments, duration totals, and B-roll shot IDs intersected by each cut. It also writes `retime_map.json`, whose segments map kept source time to edited time. The reusable `map_source_time` helper raises for timestamps inside a removed region unless the caller explicitly chooses a boundary bias. V4A does not alter B-roll choices or source ranges, apply punch-ins, change audio or video, or render. Future V4B can apply the same cuts to all layers.
+The command writes `projects/<name>/speech_edit_plan.json` with cuts, detected-silence bounds, detection settings, complementary keep segments, duration totals, and B-roll shot IDs intersected by each cut. It also writes `retime_map.json`, whose segments map kept source time to edited time. The reusable `map_source_time` helper raises for timestamps inside a removed region unless the caller explicitly chooses a boundary bias. V4A does not alter B-roll choices or source ranges, apply punch-ins, change audio or video, or render. V4B applies the same cuts to all layers.
 
 ### V4B speech-shortened compositing
 
@@ -172,6 +172,8 @@ V4C styles the existing V4B primary keep segments with a deterministic 100% / 10
 
 The command writes `projects/<name>/jump_cut_style_plan.json`, `styled_edit_timeline.json`, and `punch_in_render_manifest.json`, and renders `output/<name>/punch_in_draft.mp4`. Existing V3D and V4B drafts stay separate. V4C does not yet add face tracking, animated zoom, subtitles, music, or transitions.
 
+The visual pipeline runs from source media through transcription, AI Director and B-roll selection, layered editing, speech pause cuts, and punch-in framing to `punch_in_draft.mp4`. This is the current visual endpoint; accessibility captions are separate sidecar files.
+
 ### V5A sidecar accessibility captions
 
 V5A exports UTF-8 SRT and WebVTT caption tracks from saved transcript word timestamps. It maps timestamps to the speech-edited timeline by collapsing removed acoustic silence to each cut boundary; words spanning a cut keep their text. The final duration comes from `retimed_edit_timeline.json`. Whisper timestamps are reused as supplied, with no retranscription. V4C punch-in framing leaves timing unchanged, so the sidecars can accompany either the speech-edited or punch-in draft for a long-form YouTube upload.
@@ -180,18 +182,7 @@ V5A exports UTF-8 SRT and WebVTT caption tracks from saved transcript word times
 ./.venv/bin/python factory.py --project real_test_large_001 --export-captions
 ```
 
-The command creates `projects/<name>/caption_timeline.json`, `projects/<name>/caption_export_manifest.json`, `output/<name>/captions.srt`, and `output/<name>/captions.vtt`. Existing caption sidecars require `--overwrite-captions` to replace. Captions are not burned into video and no media is modified. Sparse visual emphasis planning is handled separately by V5B.
-
-### V5B sparse Smart Emphasis planning
-
-V5A sidecars provide accessibility captions. V5B makes a separate, sparse semantic plan for a few spoken phrases; future V5C will render that plan visually. V5B does not modify video, audio, or the caption sidecars.
-
-```sh
-./.venv/bin/python factory.py --project real_test_large_001 --plan-emphasis --emphasis-selector rule
-./.venv/bin/python factory.py --project real_test_large_001 --plan-emphasis --emphasis-selector codex
-```
-
-The default rule selector is deterministic and offline. It favors concise phrases with natural cue or connector boundaries and gives small penalties to phrases that begin or end with common English or Russian function words; other languages use neutral word-boundary scoring. Codex is opt-in. Both selectors choose only IDs from `emphasis_candidates.json`; VideoFactory copies text and timing from validated contiguous transcript tokens into `emphasis_plan.json`. Candidates stay inside one caption cue and one visible primary keep region. B-roll-covered intervals are excluded. A readable display window is centered near each phrase: 0.2 seconds of lead plus 0.4 seconds of hold, expanded to at least 1.5 seconds and capped at 3.0 seconds, then clamped inside the visible region. Phrases that cannot fit are omitted. The default gap between selected windows is 5 seconds; `--emphasis-min-gap-seconds` changes it. `--emphasis-max-count 0` uses roughly three items per minute, capped at 12, as a maximum rather than a quota. The plan stores natural spoken text without visual styling.
+The command creates `projects/<name>/caption_timeline.json`, `projects/<name>/caption_export_manifest.json`, `output/<name>/captions.srt`, and `output/<name>/captions.vtt`. Existing caption sidecars require `--overwrite-captions` to replace. These accessibility and search caption tracks are not burned into video, and no media is modified.
 
 Inspect the plan and map before any timing changes to media:
 
