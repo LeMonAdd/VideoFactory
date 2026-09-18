@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "VideoFactory Accessibility Caption Timeline",
+  "type": "object", "additionalProperties": false,
+  "required": ["schema_version", "project_name", "source_transcript", "retime_source", "timeline_source", "duration", "language", "cues"],
+  "properties": {
+    "schema_version": {"type": "integer", "const": 1},
+    "project_name": {"type": "string", "minLength": 1},
+    "source_transcript": {"type": "string", "const": "transcript.json"},
+    "retime_source": {"type": "string", "const": "retime_map.json"},
+    "timeline_source": {"type": "string", "const": "retimed_edit_timeline.json"},
+    "duration": {"type": "number", "exclusiveMinimum": 0},
+    "language": {"type": "string", "minLength": 1},
+    "cues": {"type": "array", "minItems": 1, "items": {"type": "object", "additionalProperties": false,
+      "required": ["index", "start", "end", "text"],
+      "properties": {
+        "index": {"type": "integer", "minimum": 1},
+        "start": {"type": "number", "minimum": 0},
+        "end": {"type": "number", "exclusiveMinimum": 0},
+        "text": {"type": "string", "minLength": 1, "pattern": "^[^\\r\\n]+$"}
+      }}}
+  }
+}

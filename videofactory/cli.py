@@ -24,6 +24,7 @@ from .speech_renderer import SpeechEditRenderer
 from .jump_cut_style import (build_jump_cut_style_plan, build_styled_edit_timeline,
                              validate_punch_in_scale)
 from .punch_in_renderer import PunchInRenderer
+from .caption_export import CaptionExporter
 from .media_probe import duration as probe_duration
 from .media_probe import probe, stream
 from .models import read_json, write_json
@@ -98,6 +99,10 @@ def parser() -> argparse.ArgumentParser:
                         help="Render the saved speech-shortened layered edit to speech_edited_draft.mp4")
     result.add_argument("--render-punch-ins", action="store_true",
                         help="Render static alternating primary framing to punch_in_draft.mp4")
+    result.add_argument("--export-captions", action="store_true",
+                        help="Export retimed SRT and WebVTT sidecar captions without rendering")
+    result.add_argument("--overwrite-captions", action="store_true",
+                        help="Replace existing generated caption sidecars")
     result.add_argument("--punch-in-scale", type=float, default=1.08,
                         help="Static framing scale on alternating primary segments (default: 1.08)")
     result.add_argument("--pause-threshold-seconds", type=float, default=1.0,
@@ -520,6 +525,44 @@ def run_render_punch_ins(args: argparse.Namespace) -> Path:
     return final
 
 
+def run_export_captions(args: argparse.Namespace) -> dict:
+    name = safe_project_name(args.project)
+    paths = ProjectPaths(ROOT, name)
+    progress = ProgressReporter(5)
+    progress.start(1, "Loading caption artifacts")
+    required = ("transcript.json", "retime_map.json", "retimed_edit_timeline.json")
+    for filename in required:
+        if not (paths.project / filename).is_file():
+            raise FileNotFoundError(f"Existing project needs {paths.project / filename}")
+    transcript = read_json(paths.project / "transcript.json")
+    retime_map = read_json(paths.project / "retime_map.json")
+    retimed = read_json(paths.project / "retimed_edit_timeline.json")
+    project_path = paths.project / "project.json"
+    project = read_json(project_path) if project_path.is_file() else {}
+    if project and project.get("project_name") != name:
+        raise ValueError("Existing project.json has a mismatched name")
+    transcription = project.get("transcription", {})
+    project_language = transcription.get("language") if isinstance(transcription, dict) else None
+    progress.complete(1, "Caption artifact loading")
+    progress.start(2, "Validating final retime timeline")
+    from .caption_timeline import validate_caption_inputs
+    validate_caption_inputs(name, transcript, retime_map, retimed)
+    progress.complete(2, "Final retime timeline validation")
+    progress.start(3, "Building caption timeline")
+    from .caption_timeline import build_caption_timeline
+    build_caption_timeline(name, transcript, retime_map, retimed,
+                           project_language=project_language)
+    progress.complete(3, "Caption timeline construction")
+    progress.start(4, "Exporting SRT and WebVTT")
+    manifest = CaptionExporter().export(paths.project, paths.output, name, transcript,
+                                        retime_map, retimed, overwrite=args.overwrite_captions,
+                                        project_language=project_language)
+    progress.complete(4, "Caption sidecar export")
+    progress.start(5, "Validating and saving caption export")
+    progress.complete(5, "Caption export validation and save")
+    return manifest
+
+
 def run(args: argparse.Namespace) -> dict:
     name = safe_project_name(args.project)
     mode = "TALKING_HEAD" if args.video else "VOICEOVER"
@@ -584,7 +627,8 @@ def main(argv: list[str] | None = None) -> int:
     supplied_args = argv if argv is not None else sys.argv[1:]
     workflows = sum((args.plan_only, args.find_sources, args.select_sources,
                      args.download_sources, args.build_edit_timeline, args.render_edit,
-                     args.plan_speech_edits, args.render_speech_edits, args.render_punch_ins))
+                     args.plan_speech_edits, args.render_speech_edits, args.render_punch_ins,
+                     args.export_captions))
     if workflows > 1:
         command_parser.error("Choose only one existing-project workflow")
     if args.find_sources:
@@ -613,6 +657,9 @@ def main(argv: list[str] | None = None) -> int:
     elif args.render_punch_ins:
         if args.video or args.voice or args.fixture_transcript:
             command_parser.error("--render-punch-ins uses an existing project and cannot take source or fixture arguments")
+    elif args.export_captions:
+        if args.video or args.voice or args.fixture_transcript:
+            command_parser.error("--export-captions uses an existing project and cannot take source or fixture arguments")
     elif args.source_provider:
         command_parser.error("--source-provider requires --find-sources")
     elif args.plan_only:
@@ -641,6 +688,8 @@ def main(argv: list[str] | None = None) -> int:
     if any(item == "--punch-in-scale" or item.startswith("--punch-in-scale=")
            for item in supplied_args) and not args.render_punch_ins:
         command_parser.error("--punch-in-scale requires --render-punch-ins")
+    if args.overwrite_captions and not args.export_captions:
+        command_parser.error("--overwrite-captions requires --export-captions")
     try:
         validate_parameters(args.pause_threshold_seconds, args.pause_keep_seconds)
         validate_noise_db(args.silence_noise_db)
@@ -657,6 +706,12 @@ def main(argv: list[str] | None = None) -> int:
     except ValueError as exc:
         command_parser.error(str(exc))
     try:
+        if args.export_captions:
+            manifest = run_export_captions(args)
+            print(f"Caption cues: {manifest['cue_count']}\nLanguage: {manifest['language']}\n"
+                  f"Duration: {manifest['duration']:.3f}s\n"
+                  f"SRT: {manifest['srt_path']}\nVTT: {manifest['vtt_path']}")
+            return 0
         if args.render_punch_ins:
             print(f"Punch-in draft rendered and validated: {run_render_punch_ins(args)}")
             return 0

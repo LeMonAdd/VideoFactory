@@ -172,6 +172,16 @@ V4C styles the existing V4B primary keep segments with a deterministic 100% / 10
 
 The command writes `projects/<name>/jump_cut_style_plan.json`, `styled_edit_timeline.json`, and `punch_in_render_manifest.json`, and renders `output/<name>/punch_in_draft.mp4`. Existing V3D and V4B drafts stay separate. V4C does not yet add face tracking, animated zoom, subtitles, music, or transitions.
 
+### V5A sidecar accessibility captions
+
+V5A exports UTF-8 SRT and WebVTT caption tracks from saved transcript word timestamps. It maps timestamps to the speech-edited timeline by collapsing removed acoustic silence to each cut boundary; words spanning a cut keep their text. The final duration comes from `retimed_edit_timeline.json`. Whisper timestamps are reused as supplied, with no retranscription. V4C punch-in framing leaves timing unchanged, so the sidecars can accompany either the speech-edited or punch-in draft for a long-form YouTube upload.
+
+```sh
+./.venv/bin/python factory.py --project real_test_large_001 --export-captions
+```
+
+The command creates `projects/<name>/caption_timeline.json`, `projects/<name>/caption_export_manifest.json`, `output/<name>/captions.srt`, and `output/<name>/captions.vtt`. Existing caption sidecars require `--overwrite-captions` to replace. Captions are not burned into video and no media is modified. Sparse visual emphasis text is a separate future V5B phase.
+
 Inspect the plan and map before any timing changes to media:
 
 ```sh

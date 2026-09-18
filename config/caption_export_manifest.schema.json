@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "VideoFactory Caption Export Manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "project_name", "input_transcript", "input_retime_map", "input_retimed_edit_timeline", "duration", "language", "cue_count", "srt_path", "vtt_path", "srt_size_bytes", "vtt_size_bytes", "srt_sha256", "vtt_sha256", "transcript_sha256", "retime_map_sha256", "retimed_edit_timeline_sha256", "caption_timeline_sha256"],
+  "properties": {
+    "schema_version": {"type": "integer", "const": 1},
+    "project_name": {"type": "string", "minLength": 1},
+    "input_transcript": {"type": "string", "const": "transcript.json"},
+    "input_retime_map": {"type": "string", "const": "retime_map.json"},
+    "input_retimed_edit_timeline": {"type": "string", "const": "retimed_edit_timeline.json"},
+    "duration": {"type": "number", "exclusiveMinimum": 0},
+    "language": {"type": "string", "minLength": 1},
+    "cue_count": {"type": "integer", "minimum": 1},
+    "srt_path": {"type": "string", "minLength": 1},
+    "vtt_path": {"type": "string", "minLength": 1},
+    "srt_size_bytes": {"type": "integer", "minimum": 1},
+    "vtt_size_bytes": {"type": "integer", "minimum": 1},
+    "srt_sha256": {"$ref": "#/$defs/sha256"},
+    "vtt_sha256": {"$ref": "#/$defs/sha256"},
+    "transcript_sha256": {"$ref": "#/$defs/sha256"},
+    "retime_map_sha256": {"$ref": "#/$defs/sha256"},
+    "retimed_edit_timeline_sha256": {"$ref": "#/$defs/sha256"},
+    "caption_timeline_sha256": {"$ref": "#/$defs/sha256"}
+  },
+  "$defs": {"sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}}
+}
