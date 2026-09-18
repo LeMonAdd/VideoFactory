@@ -180,7 +180,18 @@ V5A exports UTF-8 SRT and WebVTT caption tracks from saved transcript word times
 ./.venv/bin/python factory.py --project real_test_large_001 --export-captions
 ```
 
-The command creates `projects/<name>/caption_timeline.json`, `projects/<name>/caption_export_manifest.json`, `output/<name>/captions.srt`, and `output/<name>/captions.vtt`. Existing caption sidecars require `--overwrite-captions` to replace. Captions are not burned into video and no media is modified. Sparse visual emphasis text is a separate future V5B phase.
+The command creates `projects/<name>/caption_timeline.json`, `projects/<name>/caption_export_manifest.json`, `output/<name>/captions.srt`, and `output/<name>/captions.vtt`. Existing caption sidecars require `--overwrite-captions` to replace. Captions are not burned into video and no media is modified. Sparse visual emphasis planning is handled separately by V5B.
+
+### V5B sparse Smart Emphasis planning
+
+V5A sidecars provide accessibility captions. V5B makes a separate, sparse semantic plan for a few spoken phrases; future V5C will render that plan visually. V5B does not modify video, audio, or the caption sidecars.
+
+```sh
+./.venv/bin/python factory.py --project real_test_large_001 --plan-emphasis --emphasis-selector rule
+./.venv/bin/python factory.py --project real_test_large_001 --plan-emphasis --emphasis-selector codex
+```
+
+The default rule selector is deterministic and offline. It favors concise phrases with natural cue or connector boundaries and gives small penalties to phrases that begin or end with common English or Russian function words; other languages use neutral word-boundary scoring. Codex is opt-in. Both selectors choose only IDs from `emphasis_candidates.json`; VideoFactory copies text and timing from validated contiguous transcript tokens into `emphasis_plan.json`. Candidates stay inside one caption cue and one visible primary keep region. B-roll-covered intervals are excluded. A readable display window is centered near each phrase: 0.2 seconds of lead plus 0.4 seconds of hold, expanded to at least 1.5 seconds and capped at 3.0 seconds, then clamped inside the visible region. Phrases that cannot fit are omitted. The default gap between selected windows is 5 seconds; `--emphasis-min-gap-seconds` changes it. `--emphasis-max-count 0` uses roughly three items per minute, capped at 12, as a maximum rather than a quota. The plan stores natural spoken text without visual styling.
 
 Inspect the plan and map before any timing changes to media:
 

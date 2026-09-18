@@ -127,6 +127,11 @@ def _tokens(transcript: dict[str, Any], retime_map: dict[str, Any]) -> list[Capt
     return result
 
 
+def retimed_caption_tokens(transcript: dict[str, Any], retime_map: dict[str, Any]) -> list[CaptionToken]:
+    """Return validated transcript tokens on the caption-specific collapsed time axis."""
+    return _tokens(transcript, retime_map)
+
+
 def _cue_text(tokens: list[CaptionToken]) -> str:
     return re.sub(r"\s+([,.;:!?…])", r"\1", " ".join(token.text for token in tokens))
 
@@ -199,7 +204,7 @@ def build_caption_timeline(project_name: str, transcript: dict[str, Any],
                            retime_map: dict[str, Any], retimed: dict[str, Any],
                            project_language: str | None = None) -> dict[str, Any]:
     validate_caption_inputs(project_name, transcript, retime_map, retimed)
-    tokens = _tokens(transcript, retime_map)
+    tokens = retimed_caption_tokens(transcript, retime_map)
     if not tokens:
         raise ValueError("Transcript has no caption tokens")
     duration = retimed["duration"]

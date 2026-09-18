@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object", "additionalProperties": false,
+  "required": ["schema_version", "project_name", "duration", "language", "source_transcript", "source_retime_map", "source_caption_timeline", "source_retimed_edit_timeline", "caption_cues", "visible_regions", "candidates"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "project_name": {"type": "string", "minLength": 1},
+    "duration": {"type": "number", "exclusiveMinimum": 0},
+    "language": {"type": "string", "minLength": 1},
+    "source_transcript": {"const": "transcript.json"},
+    "source_retime_map": {"const": "retime_map.json"},
+    "source_caption_timeline": {"const": "caption_timeline.json"},
+    "source_retimed_edit_timeline": {"const": "retimed_edit_timeline.json"},
+    "caption_cues": {"type": "array", "items": {"type": "object", "additionalProperties": false,
+      "required": ["index", "start", "end", "text"],
+      "properties": {
+        "index": {"type": "integer", "minimum": 1},
+        "start": {"type": "number", "minimum": 0},
+        "end": {"type": "number", "exclusiveMinimum": 0},
+        "text": {"type": "string", "minLength": 1}
+      }}},
+    "visible_regions": {"type": "array", "items": {"$ref": "#/$defs/region"}},
+    "candidates": {"type": "array", "items": {"$ref": "#/$defs/candidate"}}
+  },
+  "$defs": {
+    "region": {"type": "object", "additionalProperties": false,
+      "required": ["keep_segment_index", "start", "end"],
+      "properties": {"keep_segment_index": {"type": "integer", "minimum": 1}, "start": {"type": "number", "minimum": 0}, "end": {"type": "number", "exclusiveMinimum": 0}}},
+    "candidate": {"type": "object", "additionalProperties": false,
+      "required": ["id", "cue_index", "token_start_index", "token_end_index", "text", "word_count", "boundary_score", "speech_start", "speech_end", "eligible_visual_start", "eligible_visual_end", "timeline_start", "timeline_end"],
+      "properties": {
+        "id": {"type": "string", "minLength": 1},
+        "cue_index": {"type": "integer", "minimum": 1},
+        "token_start_index": {"type": "integer", "minimum": 0},
+        "token_end_index": {"type": "integer", "minimum": 1},
+        "text": {"type": "string", "minLength": 1},
+        "word_count": {"type": "integer", "minimum": 1, "maximum": 5},
+        "boundary_score": {"type": "number", "minimum": -2.5, "maximum": 1.4},
+        "speech_start": {"type": "number", "minimum": 0},
+        "speech_end": {"type": "number", "exclusiveMinimum": 0},
+        "eligible_visual_start": {"type": "number", "minimum": 0},
+        "eligible_visual_end": {"type": "number", "exclusiveMinimum": 0},
+        "timeline_start": {"type": "number", "minimum": 0},
+        "timeline_end": {"type": "number", "exclusiveMinimum": 0}
+      }}
+  }
+}
